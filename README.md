@@ -10,10 +10,11 @@ The project has been modularized into easy-to-maintain files:
 
 - `main.py`: The entry point script that orchestrates the benchmarking process.
 - `config.py`: Contains configurations such as minimum/maximum graph sizes, pairs to generate, and report paths.
-- `isomorphism.py`: Conains the mathematical formulation of the isomorphism index and the Gurobi QP solver logic.
+- `isomorphism.py`: Contains the mathematical formulation of the isomorphism index and the Gurobi QP solver logic.
 - `generators.py`: Contains functions to generate isomorphic and non-isomorphic graph pairs using `networkx`.
 - `benchmark.py`: Runs the benchmark across the ranges defined in config and measures execution times and indices.
 - `report.py`: Handles generating the rich HTML report and substituting benchmark data into it.
+- `matrix_viewer.py`: Generates an interactive HTML viewer for visualizing the computed permutation matrices.
 
 ## Prerequisites
 
@@ -55,5 +56,21 @@ python main.py
 Upon completion, the script generates two files:
 - `isomorphism_report.html`: A rich, interactive report displaying graphs of solve times, isomorphism indices, and objective values vs. graph node sizes.
 - `isomorphism_report.json`: The raw aggregated statistical data from the run.
+- `data/matrices/{n}/*.json`: Individual matrix results for each graph pair, organized by node count.
 
 Open the HTML report in your preferred web browser to view the benchmark results.
+
+### Viewing Matrices
+
+To visualize the computed permutation matrices, generate the matrix viewer:
+
+```bash
+python matrix_viewer.py
+```
+
+This creates `matrix_viewer.html`, a self-contained interactive viewer that lets you:
+- Browse matrices organized by graph size (n)
+- View each matrix as a color-coded heatmap with values
+- See metadata (isomorphism index I, objective value Z*)
+
+Open `matrix_viewer.html` in your browser to explore the results.

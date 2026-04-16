@@ -2,8 +2,11 @@ import gurobipy as gp
 from gurobipy import GRB
 import numpy as np
 import networkx as nx
+import json
+import uuid
+import os
 
-def compute_isomorphism_index(G1, G2, lambda_val=0.1):
+def compute_isomorphism_index(G1, G2, lambda_val=0.1, base_dir="data/matrices"):
     n = G1.number_of_nodes()
     if n != G2.number_of_nodes():
         raise ValueError("Both graphs must have the same number of nodes.")
@@ -40,6 +43,25 @@ def compute_isomorphism_index(G1, G2, lambda_val=0.1):
     if model.status not in (GRB.OPTIMAL, GRB.TIME_LIMIT):
         return None, None
 
+    # Extract solution
+    X_star = np.array([[round(X[i, j].X, 4) for j in range(n)] for i in range(n)])
     Z_star = model.objVal
     I = np.exp(-lambda_val * Z_star)
+
+    # --- Save to structured path ---
+    entry_id = str(uuid.uuid4())
+    dir_path = os.path.join(base_dir, str(n))
+    os.makedirs(dir_path, exist_ok=True)
+
+    file_path = os.path.join(dir_path, f"{entry_id}.json")
+
+    result_entry = {
+        "Z_star": Z_star,
+        "I": I,
+        "matrix": X_star.tolist()
+    }
+
+    with open(file_path, "w") as f:
+        json.dump(result_entry, f, indent=4)
+
     return Z_star, I
