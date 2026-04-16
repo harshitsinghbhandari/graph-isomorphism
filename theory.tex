@@ -1,0 +1,111 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{bm}
+
+\title{\textbf{Continuous Relaxation for Graph Isomorphism Detection}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Problem Formulation}
+
+Given two simple, undirected graphs $G_1 = (V, E_1)$ and $G_2 = (V, E_2)$ on $n$ vertices, we seek to determine whether they are isomorphic. Two graphs are isomorphic if there exists a permutation $\pi: V \to V$ such that $(u, v) \in E_1 \iff (\pi(u), \pi(v)) \in E_2$.
+
+Let $\bm{A}, \bm{B} \in \{0,1\}^{n \times n}$ denote the adjacency matrices of $G_1$ and $G_2$ respectively. A permutation $\pi$ can be represented as a permutation matrix $\bm{P} \in \{0,1\}^{n \times n}$ where $P_{ij} = 1$ iff $\pi(i) = j$. The graphs are isomorphic iff there exists a permutation matrix $\bm{P}$ such that:
+\begin{equation}
+    \bm{P}^\top \bm{A} \bm{P} = \bm{B}
+\end{equation}
+
+Since searching over all $n!$ permutations is computationally intractable, we relax the problem to a continuous optimization over \emph{doubly stochastic matrices}.
+
+\section{Doubly Stochastic Relaxation}
+
+A matrix $\bm{X} \in \mathbb{R}^{n \times n}$ is \textbf{doubly stochastic} if:
+\begin{equation}
+    X_{ij} \geq 0, \quad \sum_{j=1}^{n} X_{ij} = 1 \;\forall i, \quad \sum_{i=1}^{n} X_{ij} = 1 \;\forall j
+\end{equation}
+
+The set of doubly stochastic matrices forms the \emph{Birkhoff polytope} $\mathcal{B}_n$, whose vertices are exactly the $n!$ permutation matrices (Birkhoff--von Neumann theorem). By optimizing over $\mathcal{B}_n$, we obtain a convex relaxation of the combinatorial problem.
+
+\section{Objective Function}
+
+We formulate a quadratic program (QP) that penalizes structural mismatch between the graphs under a soft permutation $\bm{X}$.
+
+\subsection{Degree Mismatch (Linear Term)}
+
+Define the degree vectors $\bm{d}^A_i = \sum_k A_{ik}$ and $\bm{d}^B_j = \sum_k B_{jk}$. The cost matrix:
+\begin{equation}
+    C_{ij} = \left| d^A_i - d^B_j \right|
+\end{equation}
+penalizes mapping node $i$ in $G_1$ to node $j$ in $G_2$ if their degrees differ. The linear objective term is:
+\begin{equation}
+    \mathcal{L}(\bm{X}) = \sum_{i=1}^{n} \sum_{j=1}^{n} C_{ij} X_{ij} = \langle \bm{C}, \bm{X} \rangle_F
+\end{equation}
+
+\subsection{Adjacency Mismatch (Quadratic Term)}
+
+For a true permutation matrix $\bm{P}$, the transformed adjacency would be $\bm{P}^\top \bm{A} \bm{P}$. We penalize the discrepancy between $\bm{A}$ transformed by $\bm{X}$ and $\bm{B}$ transformed by $\bm{X}$:
+\begin{equation}
+    \mathcal{Q}(\bm{X}) = \sum_{p=1}^{n} \sum_{q=1}^{n} \left( \sum_{k=1}^{n} A_{pk} X_{kq} - \sum_{k=1}^{n} X_{pk} B_{kq} \right)^2
+\end{equation}
+
+This can be written in matrix form. Let $\bm{R} = \bm{A}\bm{X} - \bm{X}\bm{B}$, then:
+\begin{equation}
+    \mathcal{Q}(\bm{X}) = \|\bm{A}\bm{X} - \bm{X}\bm{B}\|_F^2 = \sum_{p,q} R_{pq}^2
+\end{equation}
+
+When $\bm{X} = \bm{P}$ is a valid isomorphism, we have $\bm{A}\bm{P} = \bm{P}\bm{B}$, hence $\mathcal{Q}(\bm{P}) = 0$.
+
+\section{Quadratic Program}
+
+The complete optimization problem is:
+\begin{equation}
+\boxed{
+\begin{aligned}
+    Z^* = \min_{\bm{X}} \quad & \mathcal{L}(\bm{X}) + \mathcal{Q}(\bm{X}) \\
+    \text{s.t.} \quad & \sum_{j=1}^{n} X_{ij} = 1 \quad \forall\, i \in \{1, \ldots, n\} \\
+    & \sum_{i=1}^{n} X_{ij} = 1 \quad \forall\, j \in \{1, \ldots, n\} \\
+    & X_{ij} \geq 0 \quad \forall\, i, j
+\end{aligned}
+}
+\end{equation}
+
+This is a convex QP (the quadratic term is a sum of squares, hence convex) and can be solved efficiently using standard solvers such as Gurobi.
+
+\section{Isomorphism Index}
+
+The optimal objective value $Z^*$ measures the ``distance'' from isomorphism:
+\begin{itemize}
+    \item $Z^* = 0$: The graphs are isomorphic (a perfect permutation exists)
+    \item $Z^* > 0$: Structural mismatch; larger values indicate greater dissimilarity
+\end{itemize}
+
+We define a normalized \textbf{Isomorphism Index} $I \in (0, 1]$:
+\begin{equation}
+\boxed{
+    I = \exp(-\lambda \cdot Z^*)
+}
+\end{equation}
+
+where $\lambda > 0$ is a scaling parameter (default $\lambda = 0.1$). This maps the unbounded objective to a bounded similarity score:
+\begin{itemize}
+    \item $I \approx 1$: Graphs are (likely) isomorphic
+    \item $I \ll 1$: Graphs are structurally dissimilar
+\end{itemize}
+
+\section{Interpretation of the Solution}
+
+The optimal $\bm{X}^*$ is a doubly stochastic matrix representing a ``soft'' node correspondence:
+\begin{itemize}
+    \item If $\bm{X}^*$ is a permutation matrix (binary), it directly encodes the isomorphism mapping
+    \item If $\bm{X}^*$ has fractional entries, the relaxation is not tight---this typically occurs for non-isomorphic graphs where no perfect matching exists
+\end{itemize}
+
+\section{Complexity}
+
+The QP has $n^2$ variables and $2n$ equality constraints. Modern interior-point solvers achieve polynomial complexity in practice, making this approach tractable for moderate graph sizes ($n \lesssim 100$).
+
+\end{document}
