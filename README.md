@@ -26,7 +26,7 @@ The project has been modularized into easy-to-maintain files:
 1. Clone this repository:
    ```bash
    git clone https://github.com/harshitsinghbhandari/graph-isomorphism.git
-   cd graph-isomorph
+   cd graph-isomorphism
    ```
 
 2. Create a virtual environment (optional but recommended):
