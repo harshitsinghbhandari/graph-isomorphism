@@ -59,6 +59,10 @@ def _degree_cost_matrix(A, B, degree_weight, neighbor_degree_weight):
     )
 
 
+def _adjacency_matrix_for_solver(G):
+    return nx.to_numpy_array(G, nodelist=sorted(G.nodes()))
+
+
 def compute_isomorphism_index(
     G1,
     G2,
@@ -71,8 +75,8 @@ def compute_isomorphism_index(
     if n != G2.number_of_nodes():
         raise ValueError("Both graphs must have the same number of nodes.")
 
-    A = nx.to_numpy_array(G1)
-    B = nx.to_numpy_array(G2)
+    A = _adjacency_matrix_for_solver(G1)
+    B = _adjacency_matrix_for_solver(G2)
     weights = _merge_solver_weights(solver_weights)
     degree_weights = weights["degree_profile"]
     C = _degree_cost_matrix(

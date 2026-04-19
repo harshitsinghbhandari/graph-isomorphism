@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import config
 from benchmark import run_benchmark
+from matrix_viewer import generate_viewer, scan_matrices
 from report import generate_report
 
 if __name__ == "__main__":
@@ -27,6 +28,10 @@ if __name__ == "__main__":
     json_path = config.REPORT_PATH.replace(".html", ".json")
     Path(json_path).write_text(json.dumps(results, indent=2))
     print(f"  Raw data saved → {json_path}")
+
+    print("\n  Generating matrix viewer...")
+    matrix_data = scan_matrices()
+    generate_viewer(matrix_data)
 
     print("\n" + "="*60)
     print("  DONE. Open the HTML report in any browser.")
