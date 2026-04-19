@@ -1,5 +1,7 @@
 import json
+import shutil
 from pathlib import Path
+from comparison_report import generate_comparison_report
 import config
 from benchmark import run_benchmark
 from matrix_viewer import generate_viewer, scan_matrices
@@ -12,6 +14,11 @@ if __name__ == "__main__":
     print(f"  Total QP solves: {(config.N_MAX - config.N_MIN + 1) * 2 * config.PAIRS}")
     print(f"  Weights: {config.SOLVER_WEIGHTS}")
     print("="*60)
+
+    data_dir = Path("data")
+    if data_dir.exists():
+        print("\n  Clearing existing data directory...")
+        shutil.rmtree(data_dir)
 
     results = run_benchmark(
         config.N_MIN,
@@ -32,6 +39,9 @@ if __name__ == "__main__":
     print("\n  Generating matrix viewer...")
     matrix_data = scan_matrices()
     generate_viewer(matrix_data)
+
+    print("\n  Generating detailed comparison report...")
+    generate_comparison_report()
 
     print("\n" + "="*60)
     print("  DONE. Open the HTML report in any browser.")

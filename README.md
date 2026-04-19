@@ -55,6 +55,7 @@ python main.py
 
 Upon completion, the script generates two files:
 - `isomorphism_report.html`: A rich, interactive report displaying graphs of solve times, isomorphism indices, and objective values vs. graph node sizes.
+- `comparison_report.html`: A detailed per-comparison diagnostics report showing graph `A`, graph `B`, `X*`, and ambiguity flags.
 - `isomorphism_report.json`: The raw aggregated statistical data from the run.
 - `data/matrices/{n}/*.json`: Individual matrix results for each graph pair, organized by node count.
 
@@ -70,7 +71,7 @@ python matrix_viewer.py
 
 This creates `matrix_viewer.html`, a self-contained interactive viewer that lets you:
 - Browse matrices organized by graph size (n)
-- View each matrix as a color-coded heatmap with values
+- View graph `A`, graph `B`, and the final permutation matrix `X*` side by side
 - See metadata including pair type, comparison result, isomorphism index `I`, and objective value `Z*`
 
 Open `matrix_viewer.html` in your browser to explore the results.

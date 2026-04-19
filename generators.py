@@ -1,5 +1,8 @@
 import networkx as nx
 
+DENSE_RATIO_MIN = 0.80
+DENSE_RATIO_MAX = 0.85
+
 
 def _non_identity_permutation(n, rng):
     perm = rng.permutation(n)
@@ -12,15 +15,23 @@ def _sorted_adjacency_matrix(G):
     return nx.to_numpy_array(G, nodelist=sorted(G.nodes()))
 
 
+def _dense_edge_count(n, rng):
+    max_edges = n * (n - 1) // 2
+    min_edges = int(round(DENSE_RATIO_MIN * max_edges))
+    max_dense_edges = int(round(DENSE_RATIO_MAX * max_edges))
+    return int(rng.integers(min_edges, max_dense_edges + 1))
+
+
 def make_isomorphic_pair(n, rng):
     """Create an isomorphic pair whose solver-basis adjacency matrices are not identical."""
-    p = min(0.3 + 10 / n, 0.7)
     if n <= 2:
-        G1 = nx.erdos_renyi_graph(n, p, seed=int(rng.integers(1_000_000)))
+        m = _dense_edge_count(n, rng)
+        G1 = nx.gnm_random_graph(n, m, seed=int(rng.integers(1_000_000)))
         return G1, G1.copy()
 
     for _ in range(128):
-        G1 = nx.erdos_renyi_graph(n, p, seed=int(rng.integers(1_000_000)))
+        m = _dense_edge_count(n, rng)
+        G1 = nx.gnm_random_graph(n, m, seed=int(rng.integers(1_000_000)))
         perm = _non_identity_permutation(n, rng)
 
         # Relabel onto a disjoint node set so the adjacency matrix basis is actually permuted.
@@ -35,8 +46,8 @@ def make_isomorphic_pair(n, rng):
 
 def make_non_isomorphic_pair(n, rng):
     """Create two random graphs that are almost certainly non-isomorphic."""
-    p1 = min(0.3 + 10 / n, 0.7)
-    p2 = min(0.15 + 5 / n, 0.5)
-    G1 = nx.erdos_renyi_graph(n, p1, seed=int(rng.integers(1_000_000)))
-    G2 = nx.erdos_renyi_graph(n, p2, seed=int(rng.integers(1_000_000)))
+    m1 = _dense_edge_count(n, rng)
+    m2 = _dense_edge_count(n, rng)
+    G1 = nx.gnm_random_graph(n, m1, seed=int(rng.integers(1_000_000)))
+    G2 = nx.gnm_random_graph(n, m2, seed=int(rng.integers(1_000_000)))
     return G1, G2

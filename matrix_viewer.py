@@ -159,18 +159,77 @@ body {
   flex: 1;
   overflow: auto;
   padding: 1.5rem;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
 }
-.matrix-wrapper {
+.comparison-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(360px, auto) minmax(280px, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+.panel {
   background: #fff;
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: 1.25rem;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.panel-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.9rem;
+}
+.panel-subtitle {
+  font-size: 0.75rem;
+  color: #777;
+  margin-bottom: 0.9rem;
+  font-family: 'SF Mono', Monaco, 'Consolas', monospace;
+}
+.matrix-wrapper {
+  padding: 0;
+  box-shadow: none;
+  background: transparent;
+  border-radius: 0;
+}
+.graph-svg {
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
+  background: linear-gradient(180deg, #fcfcfb 0%, #f2f2ef 100%);
+  border: 1px solid #e5e5e3;
+  border-radius: 10px;
+}
+.graph-edge {
+  stroke: #b8b8b3;
+  stroke-width: 1.8;
+}
+.graph-node {
+  fill: #1d4ed8;
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+.graph-node-label {
+  font-size: 10px;
+  fill: #ffffff;
+  font-family: 'SF Mono', Monaco, 'Consolas', monospace;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+.graph-empty {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1rem;
+  color: #8a8a84;
+  background: #f8f8f6;
+  border: 1px dashed #d8d8d3;
+  border-radius: 10px;
+  font-size: 0.9rem;
 }
 .matrix {
   border-collapse: collapse;
+  margin: 0 auto;
 }
 .matrix td {
   width: 42px;
@@ -230,6 +289,12 @@ body {
   border-radius: 3px;
   background: linear-gradient(to right, #ffffff, #dbeafe, #3b82f6, #1e40af);
   border: 1px solid #e5e5e3;
+}
+
+@media (max-width: 1200px) {
+  .comparison-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Empty state */
@@ -364,6 +429,51 @@ function formatValue(v) {
   return v.toExponential(0);
 }
 
+function renderGraphPanel(title, graph, emptyMessage) {
+  if (!graph || !graph.nodes || !graph.edges) {
+    return `
+      <div class="panel">
+        <div class="panel-title">${title}</div>
+        <div class="graph-empty">${emptyMessage}</div>
+      </div>
+    `;
+  }
+
+  const width = 320;
+  const height = 320;
+  const padding = 34;
+  const nodes = graph.nodes.map(node => ({
+    ...node,
+    svgX: padding + ((node.x + 1) / 2) * (width - padding * 2),
+    svgY: padding + ((1 - (node.y + 1) / 2)) * (height - padding * 2),
+  }));
+  const nodeMap = Object.fromEntries(nodes.map(node => [node.id, node]));
+
+  const edgesSvg = graph.edges.map(edge => {
+    const source = nodeMap[edge.source];
+    const target = nodeMap[edge.target];
+    return `<line class="graph-edge" x1="${source.svgX}" y1="${source.svgY}" x2="${target.svgX}" y2="${target.svgY}" />`;
+  }).join('');
+
+  const nodesSvg = nodes.map(node => `
+    <g>
+      <circle class="graph-node" cx="${node.svgX}" cy="${node.svgY}" r="15" />
+      <text class="graph-node-label" x="${node.svgX}" y="${node.svgY}">${node.id}</text>
+    </g>
+  `).join('');
+
+  return `
+    <div class="panel">
+      <div class="panel-title">${title}</div>
+      <div class="panel-subtitle">${graph.edges.length} edges</div>
+      <svg class="graph-svg" viewBox="0 0 ${width} ${height}" aria-label="${title}">
+        ${edgesSvg}
+        ${nodesSvg}
+      </svg>
+    </div>
+  `;
+}
+
 function normalizeComparisonType(file) {
   if (file.comparison_type) return file.comparison_type;
   return file.I > 0.9 ? 'isomorphic (inferred)' : 'non-isomorphic (inferred)';
@@ -450,7 +560,17 @@ function renderMatrix(n, file) {
   `;
   html += '</div>';
 
-  container.innerHTML = html;
+  container.innerHTML = `
+    <div class="comparison-layout">
+      ${renderGraphPanel('Graph A', file.graph_a, 'Graph A not stored in this result. Rerun the benchmark to embed graph snapshots.')}
+      <div class="panel">
+        <div class="panel-title">Permutation Matrix X*</div>
+        <div class="panel-subtitle">${size} × ${size}</div>
+        ${html}
+      </div>
+      ${renderGraphPanel('Graph B', file.graph_b, 'Graph B not stored in this result. Rerun the benchmark to embed graph snapshots.')}
+    </div>
+  `;
 }
 </script>
 

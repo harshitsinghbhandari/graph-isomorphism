@@ -63,6 +63,27 @@ def _adjacency_matrix_for_solver(G):
     return nx.to_numpy_array(G, nodelist=sorted(G.nodes()))
 
 
+def _serialize_graph(G):
+    node_order = sorted(G.nodes())
+    layout = nx.circular_layout(node_order)
+
+    return {
+        "nodes": [
+            {
+                "id": int(node),
+                "x": float(layout[node][0]),
+                "y": float(layout[node][1]),
+            }
+            for node in node_order
+        ],
+        "edges": [
+            {"source": int(u), "target": int(v)}
+            for u, v in sorted(G.edges())
+        ],
+        "adjacency": _adjacency_matrix_for_solver(G).astype(int).tolist(),
+    }
+
+
 def compute_isomorphism_index(
     G1,
     G2,
@@ -149,6 +170,8 @@ def compute_isomorphism_index(
         "Z_star": Z_star,
         "I": I,
         "matrix": X_star.tolist(),
+        "graph_a": _serialize_graph(G1),
+        "graph_b": _serialize_graph(G2),
         "weights": weights,
     }
     if comparison_type:
