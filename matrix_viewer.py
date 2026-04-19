@@ -150,6 +150,9 @@ body {
 .meta-value.bad {
   color: #dc2626;
 }
+.meta-value.neutral {
+  color: #7c3aed;
+}
 
 /* Matrix container */
 .matrix-container {
@@ -361,6 +364,19 @@ function formatValue(v) {
   return v.toExponential(0);
 }
 
+function normalizeComparisonType(file) {
+  if (file.comparison_type) return file.comparison_type;
+  return file.I > 0.9 ? 'isomorphic (inferred)' : 'non-isomorphic (inferred)';
+}
+
+function getComparisonResult(file) {
+  const isIsomorphic = file.I > 0.9;
+  return {
+    label: isIsomorphic ? 'matched as isomorphic' : 'matched as non-isomorphic',
+    className: isIsomorphic ? 'good' : 'bad',
+  };
+}
+
 function renderMatrix(n, file) {
   const title = document.getElementById('title');
   const meta = document.getElementById('meta');
@@ -369,12 +385,21 @@ function renderMatrix(n, file) {
   title.textContent = `Matrix n=${n}`;
 
   const iScore = file.I;
-  const isGood = iScore > 0.9;
+  const expectedType = normalizeComparisonType(file);
+  const comparisonResult = getComparisonResult(file);
 
   meta.innerHTML = `
     <div class="meta-item">
+      <span class="meta-label">Pair:</span>
+      <span class="meta-value neutral">${expectedType}</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-label">Result:</span>
+      <span class="meta-value ${comparisonResult.className}">${comparisonResult.label}</span>
+    </div>
+    <div class="meta-item">
       <span class="meta-label">I =</span>
-      <span class="meta-value ${isGood ? 'good' : 'bad'}">${iScore.toFixed(6)}</span>
+      <span class="meta-value ${comparisonResult.className}">${iScore.toFixed(6)}</span>
     </div>
     <div class="meta-item">
       <span class="meta-label">Z* =</span>

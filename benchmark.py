@@ -20,7 +20,13 @@ def run_benchmark(n_min=1, n_max=50, pairs_per_type=5, lambda_val=0.1, solver_we
             run_idx += 1
             G1, G2 = make_isomorphic_pair(n, rng)
             t0 = time.perf_counter()
-            Z, I = compute_isomorphism_index(G1, G2, lambda_val, solver_weights=solver_weights)
+            Z, I = compute_isomorphism_index(
+                G1,
+                G2,
+                lambda_val,
+                solver_weights=solver_weights,
+                comparison_type="isomorphic",
+            )
             elapsed = time.perf_counter() - t0
             if Z is not None:
                 iso_times.append(elapsed)
@@ -34,7 +40,13 @@ def run_benchmark(n_min=1, n_max=50, pairs_per_type=5, lambda_val=0.1, solver_we
             run_idx += 1
             G1, G2 = make_non_isomorphic_pair(n, rng)
             t0 = time.perf_counter()
-            Z, I = compute_isomorphism_index(G1, G2, lambda_val, solver_weights=solver_weights)
+            Z, I = compute_isomorphism_index(
+                G1,
+                G2,
+                lambda_val,
+                solver_weights=solver_weights,
+                comparison_type="non-isomorphic",
+            )
             elapsed = time.perf_counter() - t0
             if Z is not None:
                 non_iso_times.append(elapsed)

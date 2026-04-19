@@ -71,6 +71,6 @@ python matrix_viewer.py
 This creates `matrix_viewer.html`, a self-contained interactive viewer that lets you:
 - Browse matrices organized by graph size (n)
 - View each matrix as a color-coded heatmap with values
-- See metadata (isomorphism index I, objective value Z*)
+- See metadata including pair type, comparison result, isomorphism index `I`, and objective value `Z*`
 
 Open `matrix_viewer.html` in your browser to explore the results.

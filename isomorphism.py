@@ -59,7 +59,14 @@ def _degree_cost_matrix(A, B, degree_weight, neighbor_degree_weight):
     )
 
 
-def compute_isomorphism_index(G1, G2, lambda_val=0.1, base_dir="data/matrices", solver_weights=None):
+def compute_isomorphism_index(
+    G1,
+    G2,
+    lambda_val=0.1,
+    base_dir="data/matrices",
+    solver_weights=None,
+    comparison_type=None,
+):
     n = G1.number_of_nodes()
     if n != G2.number_of_nodes():
         raise ValueError("Both graphs must have the same number of nodes.")
@@ -140,6 +147,8 @@ def compute_isomorphism_index(G1, G2, lambda_val=0.1, base_dir="data/matrices", 
         "matrix": X_star.tolist(),
         "weights": weights,
     }
+    if comparison_type:
+        result_entry["comparison_type"] = comparison_type
 
     with open(file_path, "w") as f:
         json.dump(result_entry, f, indent=4)
