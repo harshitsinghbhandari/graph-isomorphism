@@ -32,15 +32,36 @@ The set of doubly stochastic matrices forms the \emph{Birkhoff polytope} $\mathc
 
 \section{Objective Function}
 
-We formulate a quadratic program (QP) that penalizes structural mismatch between the graphs under a soft permutation $\bm{X}$.
+We formulate a quadratic program (QP) that penalizes structural mismatch between the graphs under a soft permutation $\bm{X} \in \mathcal{B}_n$. The implemented objective combines four signals:
+\begin{enumerate}
+    \item a degree-profile compatibility term,
+    \item a first-order adjacency commutator penalty,
+    \item a second-order (two-hop) commutator penalty,
+    \item a spectral alignment penalty based on Laplacian eigenvectors.
+\end{enumerate}
 
-\subsection{Degree Mismatch (Linear Term)}
+\subsection{Degree Profile Compatibility (Linear Term)}
 
-Define the degree vectors $\bm{d}^A_i = \sum_k A_{ik}$ and $\bm{d}^B_j = \sum_k B_{jk}$. The cost matrix:
+Define the degree vectors
 \begin{equation}
-    C_{ij} = \left| d^A_i - d^B_j \right|
+    d^A_i = \sum_k A_{ik},
+    \qquad
+    d^B_j = \sum_k B_{jk},
 \end{equation}
-penalizes mapping node $i$ in $G_1$ to node $j$ in $G_2$ if their degrees differ. The linear objective term is:
+and the one-hop degree-profile summaries
+\begin{equation}
+    s^A_i = \sum_k A_{ik} d^A_k,
+    \qquad
+    s^B_j = \sum_k B_{jk} d^B_k.
+\end{equation}
+
+The node-compatibility cost matrix is
+\begin{equation}
+    C_{ij} = \alpha \left| d^A_i - d^B_j \right|
+    +
+    \beta \left| s^A_i - s^B_j \right|,
+\end{equation}
+where $\alpha, \beta \ge 0$ are tunable weights. This penalizes mapping node $i$ in $G_1$ to node $j$ in $G_2$ when their local degree statistics differ. The linear objective term is:
 \begin{equation}
     \mathcal{L}(\bm{X}) = \sum_{i=1}^{n} \sum_{j=1}^{n} C_{ij} X_{ij} = \langle \bm{C}, \bm{X} \rangle_F
 \end{equation}
@@ -59,13 +80,48 @@ This can be written in matrix form. Let $\bm{R} = \bm{A}\bm{X} - \bm{X}\bm{B}$, 
 
 When $\bm{X} = \bm{P}$ is a valid isomorphism, we have $\bm{A}\bm{P} = \bm{P}\bm{B}$, hence $\mathcal{Q}(\bm{P}) = 0$.
 
+\subsection{Two-Hop Neighborhood Penalty}
+
+Direct adjacency alone does not fully capture local structure. Let
+\begin{equation}
+    \bm{A}^{(2)} = \bm{A}^2,
+    \qquad
+    \bm{B}^{(2)} = \bm{B}^2,
+\end{equation}
+whose entries count length-2 walks and therefore encode common-neighbor structure. We add the penalty
+\begin{equation}
+    \mathcal{T}(\bm{X}) = \|\bm{A}^{(2)}\bm{X} - \bm{X}\bm{B}^{(2)}\|_F^2.
+\end{equation}
+
+As with the first-order commutator, if $\bm{X}=\bm{P}$ is an exact isomorphism then $\bm{A}^2 \bm{P} = \bm{P}\bm{B}^2$, so $\mathcal{T}(\bm{P}) = 0$.
+
+\subsection{Spectral Alignment Penalty}
+
+Let the combinatorial Laplacians be
+\begin{equation}
+    \bm{L}_A = \operatorname{diag}(\bm{A}\bm{1}) - \bm{A},
+    \qquad
+    \bm{L}_B = \operatorname{diag}(\bm{B}\bm{1}) - \bm{B}.
+\end{equation}
+Let $\bm{U}_A, \bm{U}_B \in \mathbb{R}^{n \times n}$ be matrices of Laplacian eigenvectors ordered by increasing eigenvalue. In implementation, each eigenvector column is given a deterministic sign convention to reduce the usual sign ambiguity.
+
+We then penalize disagreement between the spectral embedding of $G_1$ and the transported embedding of $G_2$:
+\begin{equation}
+    \mathcal{S}(\bm{X}) = \|\bm{U}_A - \bm{X}\bm{U}_B\|_F^2.
+\end{equation}
+
+This term gives the solver a global structural signal even when $\bm{X}$ is far from permutation-like.
+
 \section{Quadratic Program}
 
-The complete optimization problem is:
+The complete implemented optimization problem is:
 \begin{equation}
 \boxed{
 \begin{aligned}
-    Z^* = \min_{\bm{X}} \quad & \mathcal{L}(\bm{X}) + \mathcal{Q}(\bm{X}) \\
+    Z^* = \min_{\bm{X}} \quad & \mathcal{L}(\bm{X})
+    + \mathcal{Q}(\bm{X})
+    + \lambda_T \mathcal{T}(\bm{X})
+    + \lambda_S \mathcal{S}(\bm{X}) \\
     \text{s.t.} \quad & \sum_{j=1}^{n} X_{ij} = 1 \quad \forall\, i \in \{1, \ldots, n\} \\
     & \sum_{i=1}^{n} X_{ij} = 1 \quad \forall\, j \in \{1, \ldots, n\} \\
     & X_{ij} \geq 0 \quad \forall\, i, j
@@ -73,7 +129,20 @@ The complete optimization problem is:
 }
 \end{equation}
 
-This is a convex QP (the quadratic term is a sum of squares, hence convex) and can be solved efficiently using standard solvers such as Gurobi.
+Here $\lambda_T, \lambda_S \ge 0$ control the contribution of the two-hop and spectral penalties respectively. In the current codebase the default values are
+\begin{equation}
+    \alpha = 1.0, \qquad \beta = 0.35, \qquad \lambda_T = 0.2, \qquad \lambda_S = 0.15.
+\end{equation}
+
+The optimization remains a quadratic program over the Birkhoff polytope and is solved numerically with Gurobi.
+
+\subsection{Remark on Entropy Regularization}
+
+An additional entropy term,
+\begin{equation}
+    -\varepsilon \sum_{i,j} X_{ij}\log X_{ij},
+\end{equation}
+was proposed as a continuation-style regularizer to keep $\bm{X}$ diffuse early in the solve. This term is \emph{not} currently implemented in the codebase, because it requires a different nonlinear or piecewise-linear treatment than the present quadratic formulation.
 
 \section{Isomorphism Index}
 
@@ -101,7 +170,7 @@ where $\lambda > 0$ is a scaling parameter (default $\lambda = 0.1$). This maps 
 The optimal $\bm{X}^*$ is a doubly stochastic matrix representing a ``soft'' node correspondence:
 \begin{itemize}
     \item If $\bm{X}^*$ is a permutation matrix (binary), it directly encodes the isomorphism mapping
-    \item If $\bm{X}^*$ has fractional entries, the relaxation is not tight---this typically occurs for non-isomorphic graphs where no perfect matching exists
+    \item If $\bm{X}^*$ has fractional entries, the relaxation is not tight---this typically occurs for non-isomorphic graphs or for ambiguous graph symmetries
 \end{itemize}
 
 \section{Complexity}

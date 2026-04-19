@@ -9,9 +9,16 @@ if __name__ == "__main__":
     print("  ISOMORPHISM INDEX — BENCHMARK")
     print(f"  n = {config.N_MIN} to {config.N_MAX} | {config.PAIRS} iso + {config.PAIRS} non-iso pairs per n")
     print(f"  Total QP solves: {(config.N_MAX - config.N_MIN + 1) * 2 * config.PAIRS}")
+    print(f"  Weights: {config.SOLVER_WEIGHTS}")
     print("="*60)
 
-    results = run_benchmark(config.N_MIN, config.N_MAX, config.PAIRS, config.LAMBDA_VAL)
+    results = run_benchmark(
+        config.N_MIN,
+        config.N_MAX,
+        config.PAIRS,
+        config.LAMBDA_VAL,
+        config.SOLVER_WEIGHTS,
+    )
 
     print("\n  Generating HTML report...")
     generate_report(results, config.N_MAX, config.PAIRS, config.LAMBDA_VAL, config.REPORT_PATH)

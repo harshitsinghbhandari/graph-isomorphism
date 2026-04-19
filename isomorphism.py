@@ -6,17 +6,78 @@ import json
 import uuid
 import os
 
-def compute_isomorphism_index(G1, G2, lambda_val=0.1, base_dir="data/matrices"):
+DEFAULT_SOLVER_WEIGHTS = {
+    "degree_profile": {
+        "degree": 1.0,
+        "neighbor_degree": 0.35,
+    },
+    "two_hop": 0.2,
+    "spectral": 0.15,
+}
+
+
+def _merge_solver_weights(solver_weights):
+    merged = {
+        "degree_profile": dict(DEFAULT_SOLVER_WEIGHTS["degree_profile"]),
+        "two_hop": DEFAULT_SOLVER_WEIGHTS["two_hop"],
+        "spectral": DEFAULT_SOLVER_WEIGHTS["spectral"],
+    }
+    if not solver_weights:
+        return merged
+
+    if "degree_profile" in solver_weights:
+        merged["degree_profile"].update(solver_weights["degree_profile"])
+    for key in ("two_hop", "spectral"):
+        if key in solver_weights:
+            merged[key] = solver_weights[key]
+    return merged
+
+
+def _aligned_laplacian_eigenvectors(adj):
+    degrees = np.sum(adj, axis=1)
+    laplacian = np.diag(degrees) - adj
+    eigenvalues, eigenvectors = np.linalg.eigh(laplacian)
+    order = np.argsort(eigenvalues)
+    eigenvectors = eigenvectors[:, order]
+
+    # Fix the sign ambiguity column-wise so both embeddings are comparable.
+    for col in range(eigenvectors.shape[1]):
+        pivot = np.argmax(np.abs(eigenvectors[:, col]))
+        if eigenvectors[pivot, col] < 0:
+            eigenvectors[:, col] *= -1
+    return eigenvectors
+
+
+def _degree_cost_matrix(A, B, degree_weight, neighbor_degree_weight):
+    degA = np.sum(A, axis=1)
+    degB = np.sum(B, axis=1)
+    neighbor_degA = A @ degA
+    neighbor_degB = B @ degB
+    return (
+        degree_weight * np.abs(degA[:, None] - degB[None, :]) +
+        neighbor_degree_weight * np.abs(neighbor_degA[:, None] - neighbor_degB[None, :])
+    )
+
+
+def compute_isomorphism_index(G1, G2, lambda_val=0.1, base_dir="data/matrices", solver_weights=None):
     n = G1.number_of_nodes()
     if n != G2.number_of_nodes():
         raise ValueError("Both graphs must have the same number of nodes.")
 
     A = nx.to_numpy_array(G1)
     B = nx.to_numpy_array(G2)
-
-    degA = np.sum(A, axis=1)
-    degB = np.sum(B, axis=1)
-    C = np.abs(degA[:, None] - degB[None, :])
+    weights = _merge_solver_weights(solver_weights)
+    degree_weights = weights["degree_profile"]
+    C = _degree_cost_matrix(
+        A,
+        B,
+        degree_weights["degree"],
+        degree_weights["neighbor_degree"],
+    )
+    A2 = A @ A
+    B2 = B @ B
+    UA = _aligned_laplacian_eigenvectors(A)
+    UB = _aligned_laplacian_eigenvectors(B)
 
     model = gp.Model("IsomorphismIndex")
     model.setParam('OutputFlag', 0)
@@ -31,13 +92,31 @@ def compute_isomorphism_index(G1, G2, lambda_val=0.1, base_dir="data/matrices"):
 
     linear_part = gp.quicksum(C[i, j] * X[i, j] for i in range(n) for j in range(n))
 
-    quadratic_part = 0
+    adjacency_part = 0
     for p in range(n):
         for q in range(n):
             diff_expr = gp.quicksum(A[p, k] * X[k, q] - X[p, k] * B[k, q] for k in range(n))
-            quadratic_part += diff_expr * diff_expr
+            adjacency_part += diff_expr * diff_expr
 
-    model.setObjective(linear_part + quadratic_part, GRB.MINIMIZE)
+    two_hop_part = 0
+    if weights["two_hop"]:
+        for p in range(n):
+            for q in range(n):
+                diff_expr = gp.quicksum(A2[p, k] * X[k, q] - X[p, k] * B2[k, q] for k in range(n))
+                two_hop_part += diff_expr * diff_expr
+
+    spectral_part = 0
+    if weights["spectral"]:
+        for i in range(n):
+            for c in range(n):
+                diff_expr = UA[i, c] - gp.quicksum(X[i, j] * UB[j, c] for j in range(n))
+                spectral_part += diff_expr * diff_expr
+
+    objective = linear_part + adjacency_part
+    objective += weights["two_hop"] * two_hop_part
+    objective += weights["spectral"] * spectral_part
+
+    model.setObjective(objective, GRB.MINIMIZE)
     model.optimize()
 
     if model.status not in (GRB.OPTIMAL, GRB.TIME_LIMIT):
@@ -58,7 +137,8 @@ def compute_isomorphism_index(G1, G2, lambda_val=0.1, base_dir="data/matrices"):
     result_entry = {
         "Z_star": Z_star,
         "I": I,
-        "matrix": X_star.tolist()
+        "matrix": X_star.tolist(),
+        "weights": weights,
     }
 
     with open(file_path, "w") as f:
