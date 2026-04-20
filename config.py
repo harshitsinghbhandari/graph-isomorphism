@@ -9,6 +9,12 @@ SOLVER_WEIGHTS = {
         "degree": 1.0,
         "neighbor_degree": 0.35,
     },
-    "two_hop": 0.2,
+    "commutator_powers": {
+        2: 0.20,
+        3: 0.10,
+        4: 0.05,
+        5: 0.025,
+        6: 0.012,
+    },
     "spectral": 0.15,
 }

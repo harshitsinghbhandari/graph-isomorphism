@@ -36,8 +36,8 @@ We formulate a quadratic program (QP) that penalizes structural mismatch between
 \begin{enumerate}
     \item a degree-profile compatibility term,
     \item a first-order adjacency commutator penalty,
-    \item a second-order (two-hop) commutator penalty,
-    \item a spectral alignment penalty based on Laplacian eigenvectors.
+    \item a higher-order commutator cascade ($k = 2, \ldots, K$) capturing multi-hop structural differences,
+    \item a Grassmannian eigenspace alignment penalty based on Laplacian eigenspace projectors.
 \end{enumerate}
 
 \subsection{Degree Profile Compatibility (Linear Term)}
@@ -80,22 +80,18 @@ This can be written in matrix form. Let $\bm{R} = \bm{A}\bm{X} - \bm{X}\bm{B}$, 
 
 When $\bm{X} = \bm{P}$ is a valid isomorphism, we have $\bm{A}\bm{P} = \bm{P}\bm{B}$, hence $\mathcal{Q}(\bm{P}) = 0$.
 
-\subsection{Two-Hop Neighborhood Penalty}
+\subsection{Higher-Order Commutator Cascade}
 
-Direct adjacency alone does not fully capture local structure. Let
+Direct adjacency alone does not fully capture local structure. Powers of the adjacency matrix encode $k$-hop walk counts: the entries of $\bm{A}^k$ count the number of walks of length $k$ between each pair of vertices. We add commutator penalties for powers $k = 2, \ldots, K$:
 \begin{equation}
-    \bm{A}^{(2)} = \bm{A}^2,
-    \qquad
-    \bm{B}^{(2)} = \bm{B}^2,
-\end{equation}
-whose entries count length-2 walks and therefore encode common-neighbor structure. We add the penalty
-\begin{equation}
-    \mathcal{T}(\bm{X}) = \|\bm{A}^{(2)}\bm{X} - \bm{X}\bm{B}^{(2)}\|_F^2.
+    \mathcal{T}(\bm{X}) = \sum_{k=2}^{K} \lambda_k \|\bm{A}^k \bm{X} - \bm{X}\bm{B}^k\|_F^2.
 \end{equation}
 
-As with the first-order commutator, if $\bm{X}=\bm{P}$ is an exact isomorphism then $\bm{A}^2 \bm{P} = \bm{P}\bm{B}^2$, so $\mathcal{T}(\bm{P}) = 0$.
+If $\bm{X}=\bm{P}$ is an exact isomorphism then $\bm{A}^k \bm{P} = \bm{P}\bm{B}^k$ for all $k$, so $\mathcal{T}(\bm{P}) = 0$. The weights $\lambda_k$ decay with $k$ (default: $\lambda_2 = 0.20$, $\lambda_3 = 0.10$, $\lambda_4 = 0.05$, $\lambda_5 = 0.025$, $\lambda_6 = 0.012$) because higher powers amplify the spectral radius, requiring smaller weights to keep terms balanced.
 
-\subsection{Spectral Alignment Penalty}
+This cascade is critical for distinguishing strongly regular graphs with identical parameters $(n, k, \lambda, \mu)$, where the first- and second-order commutators alone provide no discrimination. For example, the Shrikhande graph and the $4 \times 4$ rook's graph---both $\text{srg}(16, 6, 2, 2)$---are distinguished at $k = 4$.
+
+\subsection{Grassmannian Eigenspace Alignment}
 
 Let the combinatorial Laplacians be
 \begin{equation}
@@ -103,14 +99,22 @@ Let the combinatorial Laplacians be
     \qquad
     \bm{L}_B = \operatorname{diag}(\bm{B}\bm{1}) - \bm{B}.
 \end{equation}
-Let $\bm{U}_A, \bm{U}_B \in \mathbb{R}^{n \times n}$ be matrices of Laplacian eigenvectors ordered by increasing eigenvalue. In implementation, each eigenvector column is given a deterministic sign convention to reduce the usual sign ambiguity.
+Compute the eigendecompositions $\bm{L}_A = \bm{U}_A \bm{\Lambda}_A \bm{U}_A^\top$ and $\bm{L}_B = \bm{U}_B \bm{\Lambda}_B \bm{U}_B^\top$. When a Laplacian has a repeated eigenvalue of multiplicity $m > 1$, the corresponding $m$-dimensional eigenspace has no canonical basis---any orthonormal basis is equally valid. Comparing raw eigenvector columns (even with sign normalization) therefore introduces spurious penalties and misleading gradient information.
 
-We then penalize disagreement between the spectral embedding of $G_1$ and the transported embedding of $G_2$:
+To resolve this, we compare \emph{eigenspaces} rather than individual eigenvectors. For each distinct eigenvalue cluster $\ell$ (grouped by proximity with tolerance $\epsilon$), let $\bm{U}_A^{(\ell)}$ denote the eigenvectors spanning that cluster and define the eigenspace projector:
 \begin{equation}
-    \mathcal{S}(\bm{X}) = \|\bm{U}_A - \bm{X}\bm{U}_B\|_F^2.
+    \bm{\Pi}_A^{(\ell)} = \bm{U}_A^{(\ell)} \left(\bm{U}_A^{(\ell)}\right)^\top,
+    \qquad
+    \bm{\Pi}_B^{(\ell)} = \bm{U}_B^{(\ell)} \left(\bm{U}_B^{(\ell)}\right)^\top.
+\end{equation}
+These projectors are invariant to rotations within degenerate eigenspaces, since $\bm{U}\bm{U}^\top$ does not depend on the choice of orthonormal basis for the column space.
+
+We penalize the commutator of the projectors with $\bm{X}$, weighted by eigenvalue magnitude $w_\ell = |\bar\lambda_\ell|$:
+\begin{equation}
+    \mathcal{S}(\bm{X}) = \sum_\ell w_\ell \left\| \bm{\Pi}_A^{(\ell)} \bm{X} - \bm{X} \bm{\Pi}_B^{(\ell)} \right\|_F^2.
 \end{equation}
 
-This term gives the solver a global structural signal even when $\bm{X}$ is far from permutation-like.
+If $\bm{X} = \bm{P}$ is a valid isomorphism, then $\bm{\Pi}_A^{(\ell)} \bm{P} = \bm{P} \bm{\Pi}_B^{(\ell)}$ for every eigenspace $\ell$, so $\mathcal{S}(\bm{P}) = 0$. The trivial eigenspace corresponding to eigenvalue 0 (constant eigenvector) is excluded, as it provides no structural information.
 
 \section{Quadratic Program}
 
@@ -120,7 +124,7 @@ The complete implemented optimization problem is:
 \begin{aligned}
     Z^* = \min_{\bm{X}} \quad & \mathcal{L}(\bm{X})
     + \mathcal{Q}(\bm{X})
-    + \lambda_T \mathcal{T}(\bm{X})
+    + \mathcal{T}(\bm{X})
     + \lambda_S \mathcal{S}(\bm{X}) \\
     \text{s.t.} \quad & \sum_{j=1}^{n} X_{ij} = 1 \quad \forall\, i \in \{1, \ldots, n\} \\
     & \sum_{i=1}^{n} X_{ij} = 1 \quad \forall\, j \in \{1, \ldots, n\} \\
@@ -129,9 +133,11 @@ The complete implemented optimization problem is:
 }
 \end{equation}
 
-Here $\lambda_T, \lambda_S \ge 0$ control the contribution of the two-hop and spectral penalties respectively. In the current codebase the default values are
+Here $\lambda_k$ (inside $\mathcal{T}$) and $\lambda_S$ control the contribution of the commutator cascade and spectral penalties respectively. In the current codebase the default values are
 \begin{equation}
-    \alpha = 1.0, \qquad \beta = 0.35, \qquad \lambda_T = 0.2, \qquad \lambda_S = 0.15.
+    \alpha = 1.0, \quad \beta = 0.35, \quad
+    \lambda_2 = 0.20, \quad \lambda_3 = 0.10, \quad \lambda_4 = 0.05, \quad \lambda_5 = 0.025, \quad \lambda_6 = 0.012, \quad
+    \lambda_S = 0.15.
 \end{equation}
 
 The optimization remains a quadratic program over the Birkhoff polytope and is solved numerically with Gurobi.
@@ -142,7 +148,7 @@ An additional entropy term,
 \begin{equation}
     -\varepsilon \sum_{i,j} X_{ij}\log X_{ij},
 \end{equation}
-was proposed as a continuation-style regularizer to keep $\bm{X}$ diffuse early in the solve. This term is \emph{not} currently implemented in the codebase, because it requires a different nonlinear or piecewise-linear treatment than the present quadratic formulation.
+was proposed as a continuation-style regularizer to keep $\bm{X}$ diffuse early in the solve and help escape local minima. This term is \emph{not} currently implemented in the codebase, because it requires a different nonlinear or piecewise-linear treatment than the present quadratic formulation. A Sinkhorn warm-start strategy (solving a regularized assignment problem to initialize the QP) is a potential alternative that preserves the QP structure.
 
 \section{Isomorphism Index}
 
@@ -165,12 +171,41 @@ where $\lambda > 0$ is a scaling parameter (default $\lambda = 0.1$). This maps 
     \item $I \ll 1$: Graphs are structurally dissimilar
 \end{itemize}
 
+\section{Post-Processing: Hungarian Rounding and Integer Verification}
+
+The isomorphism index $I$ is inherently a \emph{fuzzy} score: graphs with automorphisms can produce fractional $\bm{X}^*$ (the solver converges to the analytic center of a face of $\mathcal{B}_n$), yielding $Z^* > 0$ even for genuinely isomorphic graphs. To obtain a \textbf{provably correct binary answer}, we apply a two-step post-processing pipeline.
+
+\subsection{Hungarian Rounding}
+
+Given the optimal doubly stochastic matrix $\bm{X}^*$, we extract the nearest permutation matrix via the Hungarian algorithm:
+\begin{equation}
+    \bm{P}^* = \arg\min_{\bm{P} \in \Pi_n} \|\bm{P} - \bm{X}^*\|_F
+\end{equation}
+where $\Pi_n$ is the set of $n \times n$ permutation matrices. This is equivalent to solving a linear assignment problem on the cost matrix $\bm{1} - \bm{X}^*$, which runs in $O(n^3)$.
+
+\subsection{Integer Arithmetic Verification}
+
+Once $\bm{P}^*$ is obtained, we verify the isomorphism condition \emph{exactly} in integer arithmetic. Since the adjacency matrices $\bm{A}, \bm{B} \in \{0,1\}^{n \times n}$ and the permutation matrix $\bm{P}^* \in \{0,1\}^{n \times n}$ are all integer-valued, the residual
+\begin{equation}
+    \bm{R} = \bm{A}\bm{P}^* - \bm{P}^*\bm{B}
+\end{equation}
+can be computed without any floating-point error. The decision rule is:
+\begin{equation}
+\boxed{
+    \bm{R} = \bm{0} \implies \text{isomorphic}, \qquad
+    \bm{R} \neq \bm{0} \implies \text{inconclusive}
+}
+\end{equation}
+
+When $\bm{R} = \bm{0}$, the permutation $\bm{P}^*$ is a \emph{certificate} of isomorphism---the answer is exact. When $\bm{R} \neq \bm{0}$, the result is inconclusive rather than a definitive ``not isomorphic,'' because the Hungarian rounding may have selected the wrong permutation (e.g., if $\bm{X}^*$ was far from any correct permutation due to local minima).
+
 \section{Interpretation of the Solution}
 
-The optimal $\bm{X}^*$ is a doubly stochastic matrix representing a ``soft'' node correspondence:
+The solver produces three complementary outputs:
 \begin{itemize}
-    \item If $\bm{X}^*$ is a permutation matrix (binary), it directly encodes the isomorphism mapping
-    \item If $\bm{X}^*$ has fractional entries, the relaxation is not tight---this typically occurs for non-isomorphic graphs or for ambiguous graph symmetries
+    \item \textbf{Isomorphism index $I$}: A continuous similarity score. $I \approx 1$ suggests isomorphism; $I \ll 1$ suggests non-isomorphism. This is a heuristic with no formal threshold guarantee.
+    \item \textbf{Integer certificate}: A boolean flag from the Hungarian rounding + integer verification pipeline. When \texttt{true}, the graphs are \emph{provably} isomorphic. When \texttt{false}, the result is inconclusive.
+    \item \textbf{Soft assignment $\bm{X}^*$}: The doubly stochastic matrix representing the soft node correspondence. If $\bm{X}^*$ is near-binary, the relaxation is tight and the correspondence is sharp.
 \end{itemize}
 
 \section{Complexity}

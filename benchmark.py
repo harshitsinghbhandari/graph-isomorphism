@@ -14,13 +14,14 @@ def run_benchmark(n_min=1, n_max=50, pairs_per_type=5, lambda_val=0.1, solver_we
         iso_times, non_iso_times = [], []
         iso_scores, non_iso_scores = [], []
         iso_z, non_iso_z = [], []
+        iso_cert, non_iso_cert = [], []
 
         for _ in range(pairs_per_type):
             # --- Isomorphic pair ---
             run_idx += 1
             G1, G2 = make_isomorphic_pair(n, rng)
             t0 = time.perf_counter()
-            Z, I = compute_isomorphism_index(
+            Z, I, is_iso = compute_isomorphism_index(
                 G1,
                 G2,
                 lambda_val,
@@ -32,6 +33,7 @@ def run_benchmark(n_min=1, n_max=50, pairs_per_type=5, lambda_val=0.1, solver_we
                 iso_times.append(elapsed)
                 iso_scores.append(I)
                 iso_z.append(Z)
+                iso_cert.append(is_iso)
             pct = 100 * run_idx / total_runs
             print(f"\r  Progress: {pct:5.1f}%  |  n={n:3d}  |  iso pair {_+1}/{pairs_per_type}   ", end="", flush=True)
 
@@ -40,7 +42,7 @@ def run_benchmark(n_min=1, n_max=50, pairs_per_type=5, lambda_val=0.1, solver_we
             run_idx += 1
             G1, G2 = make_non_isomorphic_pair(n, rng)
             t0 = time.perf_counter()
-            Z, I = compute_isomorphism_index(
+            Z, I, is_iso = compute_isomorphism_index(
                 G1,
                 G2,
                 lambda_val,
@@ -52,6 +54,7 @@ def run_benchmark(n_min=1, n_max=50, pairs_per_type=5, lambda_val=0.1, solver_we
                 non_iso_times.append(elapsed)
                 non_iso_scores.append(I)
                 non_iso_z.append(Z)
+                non_iso_cert.append(is_iso)
             pct = 100 * run_idx / total_runs
             print(f"\r  Progress: {pct:5.1f}%  |  n={n:3d}  |  non-iso pair {_+1}/{pairs_per_type}  ", end="", flush=True)
 
@@ -70,6 +73,10 @@ def run_benchmark(n_min=1, n_max=50, pairs_per_type=5, lambda_val=0.1, solver_we
             "non_iso_score": safe_stats(non_iso_scores),
             "iso_z": safe_stats(iso_z),
             "non_iso_z": safe_stats(non_iso_z),
+            "iso_cert_correct": sum(iso_cert),
+            "iso_cert_total": len(iso_cert),
+            "non_iso_cert_correct": sum(1 for x in non_iso_cert if not x),
+            "non_iso_cert_total": len(non_iso_cert),
         })
 
     print()  # newline after progress

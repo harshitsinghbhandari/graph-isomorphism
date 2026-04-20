@@ -2,6 +2,7 @@ import gurobipy as gp
 from gurobipy import GRB
 import numpy as np
 import networkx as nx
+from scipy.optimize import linear_sum_assignment
 import json
 import uuid
 import os
@@ -11,7 +12,13 @@ DEFAULT_SOLVER_WEIGHTS = {
         "degree": 1.0,
         "neighbor_degree": 0.35,
     },
-    "two_hop": 0.2,
+    "commutator_powers": {
+        2: 0.20,
+        3: 0.10,
+        4: 0.05,
+        5: 0.025,
+        6: 0.012,
+    },
     "spectral": 0.15,
 }
 
@@ -19,7 +26,7 @@ DEFAULT_SOLVER_WEIGHTS = {
 def _merge_solver_weights(solver_weights):
     merged = {
         "degree_profile": dict(DEFAULT_SOLVER_WEIGHTS["degree_profile"]),
-        "two_hop": DEFAULT_SOLVER_WEIGHTS["two_hop"],
+        "commutator_powers": dict(DEFAULT_SOLVER_WEIGHTS["commutator_powers"]),
         "spectral": DEFAULT_SOLVER_WEIGHTS["spectral"],
     }
     if not solver_weights:
@@ -27,25 +34,42 @@ def _merge_solver_weights(solver_weights):
 
     if "degree_profile" in solver_weights:
         merged["degree_profile"].update(solver_weights["degree_profile"])
-    for key in ("two_hop", "spectral"):
-        if key in solver_weights:
-            merged[key] = solver_weights[key]
+    if "commutator_powers" in solver_weights:
+        merged["commutator_powers"].update(solver_weights["commutator_powers"])
+    # backward compat: old "two_hop" key maps to commutator_powers[2]
+    if "two_hop" in solver_weights and "commutator_powers" not in solver_weights:
+        merged["commutator_powers"] = {2: solver_weights["two_hop"]}
+    if "spectral" in solver_weights:
+        merged["spectral"] = solver_weights["spectral"]
     return merged
 
 
-def _aligned_laplacian_eigenvectors(adj):
+def _eigenspace_projectors(adj, degeneracy_tol=1e-6):
+    """Compute eigenspace projection operators for the graph Laplacian.
+
+    Returns a list of (projector, weight) tuples, one per eigenvalue cluster.
+    This is invariant to rotations within degenerate eigenspaces, fixing the
+    eigenvector sign/basis ambiguity problem.
+    """
     degrees = np.sum(adj, axis=1)
     laplacian = np.diag(degrees) - adj
     eigenvalues, eigenvectors = np.linalg.eigh(laplacian)
-    order = np.argsort(eigenvalues)
-    eigenvectors = eigenvectors[:, order]
 
-    # Fix the sign ambiguity column-wise so both embeddings are comparable.
-    for col in range(eigenvectors.shape[1]):
-        pivot = np.argmax(np.abs(eigenvectors[:, col]))
-        if eigenvectors[pivot, col] < 0:
-            eigenvectors[:, col] *= -1
-    return eigenvectors
+    projectors = []
+    i = 0
+    n = len(eigenvalues)
+    while i < n:
+        j = i + 1
+        while j < n and abs(eigenvalues[j] - eigenvalues[i]) < degeneracy_tol:
+            j += 1
+        U_cluster = eigenvectors[:, i:j]
+        Pi = U_cluster @ U_cluster.T
+        weight = abs(np.mean(eigenvalues[i:j]))
+        if weight > 1e-10:  # skip trivial zero-eigenvalue eigenspace
+            projectors.append((Pi, weight))
+        i = j
+
+    return projectors
 
 
 def _degree_cost_matrix(A, B, degree_weight, neighbor_degree_weight):
@@ -57,6 +81,24 @@ def _degree_cost_matrix(A, B, degree_weight, neighbor_degree_weight):
         degree_weight * np.abs(degA[:, None] - degB[None, :]) +
         neighbor_degree_weight * np.abs(neighbor_degA[:, None] - neighbor_degB[None, :])
     )
+
+
+def _hungarian_round(X_star):
+    """Round a doubly-stochastic matrix to the nearest permutation matrix."""
+    row_ind, col_ind = linear_sum_assignment(1.0 - X_star)
+    n = X_star.shape[0]
+    P = np.zeros((n, n), dtype=int)
+    P[row_ind, col_ind] = 1
+    return P
+
+
+def _integer_verify(A, B, P):
+    """Check AP == PB exactly in integer arithmetic."""
+    A_int = A.astype(np.int64)
+    B_int = B.astype(np.int64)
+    P_int = P.astype(np.int64)
+    residual = A_int @ P_int - P_int @ B_int
+    return bool(np.all(residual == 0))
 
 
 def _adjacency_matrix_for_solver(G):
@@ -106,10 +148,18 @@ def compute_isomorphism_index(
         degree_weights["degree"],
         degree_weights["neighbor_degree"],
     )
-    A2 = A @ A
-    B2 = B @ B
-    UA = _aligned_laplacian_eigenvectors(A)
-    UB = _aligned_laplacian_eigenvectors(B)
+    # Precompute matrix powers for commutator terms
+    commutator_powers = weights["commutator_powers"]
+    max_k = max(commutator_powers.keys()) if commutator_powers else 1
+    A_powers = {1: A}
+    B_powers = {1: B}
+    for k in range(2, max_k + 1):
+        A_powers[k] = A_powers[k - 1] @ A
+        B_powers[k] = B_powers[k - 1] @ B
+
+    # Grassmannian eigenspace projectors (rotation-invariant spectral term)
+    projectors_A = _eigenspace_projectors(A)
+    projectors_B = _eigenspace_projectors(B)
 
     model = gp.Model("IsomorphismIndex")
     model.setParam('OutputFlag', 0)
@@ -130,34 +180,51 @@ def compute_isomorphism_index(
             diff_expr = gp.quicksum(A[p, k] * X[k, q] - X[p, k] * B[k, q] for k in range(n))
             adjacency_part += diff_expr * diff_expr
 
-    two_hop_part = 0
-    if weights["two_hop"]:
-        for p in range(n):
-            for q in range(n):
-                diff_expr = gp.quicksum(A2[p, k] * X[k, q] - X[p, k] * B2[k, q] for k in range(n))
-                two_hop_part += diff_expr * diff_expr
+    # Higher-order commutator terms: ||A^k X - X B^k||_F^2 for k=2..K
+    commutator_part = 0
+    for k, w_k in commutator_powers.items():
+        if w_k:
+            Ak = A_powers[k]
+            Bk = B_powers[k]
+            for p in range(n):
+                for q in range(n):
+                    diff_expr = gp.quicksum(Ak[p, m] * X[m, q] - X[p, m] * Bk[m, q] for m in range(n))
+                    commutator_part += w_k * diff_expr * diff_expr
 
-    spectral_part = 0
+    # Grassmannian eigenspace alignment: ||Pi_A X - X Pi_B||_F^2
+    grassmannian_part = 0
     if weights["spectral"]:
-        for i in range(n):
-            for c in range(n):
-                diff_expr = UA[i, c] - gp.quicksum(X[i, j] * UB[j, c] for j in range(n))
-                spectral_part += diff_expr * diff_expr
+        n_clusters = min(len(projectors_A), len(projectors_B))
+        for l in range(n_clusters):
+            Pi_A, w_A = projectors_A[l]
+            Pi_B, w_B = projectors_B[l]
+            w_l = (w_A + w_B) / 2.0
+            for p in range(n):
+                for q in range(n):
+                    diff_expr = gp.quicksum(
+                        Pi_A[p, m] * X[m, q] - X[p, m] * Pi_B[m, q]
+                        for m in range(n)
+                    )
+                    grassmannian_part += w_l * diff_expr * diff_expr
 
     objective = linear_part + adjacency_part
-    objective += weights["two_hop"] * two_hop_part
-    objective += weights["spectral"] * spectral_part
+    objective += commutator_part
+    objective += weights["spectral"] * grassmannian_part
 
     model.setObjective(objective, GRB.MINIMIZE)
     model.optimize()
 
     if model.status not in (GRB.OPTIMAL, GRB.TIME_LIMIT):
-        return None, None
+        return None, None, None
 
     # Extract solution
     X_star = np.array([[round(X[i, j].X, 4) for j in range(n)] for i in range(n)])
     Z_star = model.objVal
     I = np.exp(-lambda_val * Z_star)
+
+    # Hungarian rounding + integer verification (Fix 1 from failure.tex)
+    P_star = _hungarian_round(X_star)
+    is_isomorphic = _integer_verify(A, B, P_star)
 
     # --- Save to structured path ---
     entry_id = str(uuid.uuid4())
@@ -169,7 +236,9 @@ def compute_isomorphism_index(
     result_entry = {
         "Z_star": Z_star,
         "I": I,
+        "is_isomorphic": is_isomorphic,
         "matrix": X_star.tolist(),
+        "permutation": P_star.tolist(),
         "graph_a": _serialize_graph(G1),
         "graph_b": _serialize_graph(G2),
         "weights": weights,
@@ -180,4 +249,4 @@ def compute_isomorphism_index(
     with open(file_path, "w") as f:
         json.dump(result_entry, f, indent=4)
 
-    return Z_star, I
+    return Z_star, I, is_isomorphic

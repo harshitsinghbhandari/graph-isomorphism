@@ -372,13 +372,17 @@ def _entry_analysis(entry):
     matrix = entry["matrix"]
     metrics = _row_ambiguity_metrics(matrix)
     expected_type = entry.get("comparison_type")
+    cert = entry.get("is_isomorphic")
     predicted_type = "likely isomorphic" if entry["I"] > 0.9 else "likely non-isomorphic"
+    cert_label = "isomorphic (certified)" if cert else "non-isomorphic (certified)" if cert is not None else "no certificate"
     flags = []
 
     if expected_type == "isomorphic" and predicted_type != "likely isomorphic":
         flags.append("label disagreement")
     if expected_type == "non-isomorphic" and predicted_type != "likely non-isomorphic":
         flags.append("label disagreement")
+    if cert is not None and expected_type == "non-isomorphic" and cert:
+        flags.append("false positive (certificate)")
     if metrics["mean_row_max"] < 0.85:
         flags.append("diffuse rows")
     if metrics["mean_margin"] < 0.15:
@@ -398,6 +402,7 @@ def _entry_analysis(entry):
         **metrics,
         "expected_type": expected_type or "unknown",
         "predicted_type": predicted_type,
+        "cert_label": cert_label,
         "score_gap": abs(entry["I"] - 0.9),
         "flags": flags,
         "summary": summary,
@@ -547,7 +552,7 @@ def _render_result_cards(entries):
             '<article class="result-card">'
             '<div class="result-header">'
             "<div>"
-            f'<div class="result-title">n={entry["n"]} · {escape(entry["expected_type"])} · {escape(entry["predicted_type"])}</div>'
+            f'<div class="result-title">n={entry["n"]} · {escape(entry["expected_type"])} · {escape(entry["predicted_type"])} · {escape(entry["cert_label"])}</div>'
             f'<div class="result-subtitle">{escape(entry["id"])}</div>'
             "</div>"
             '<div class="result-meta">'
