@@ -32,12 +32,10 @@ The set of doubly stochastic matrices forms the \emph{Birkhoff polytope} $\mathc
 
 \section{Objective Function}
 
-We formulate a quadratic program (QP) that penalizes structural mismatch between the graphs under a soft permutation $\bm{X} \in \mathcal{B}_n$. The implemented objective combines four signals:
+We formulate a quadratic program (QP) that penalizes structural mismatch between the graphs under a soft permutation $\bm{X} \in \mathcal{B}_n$. The objective combines two signals:
 \begin{enumerate}
-    \item a degree-profile compatibility term,
-    \item a first-order adjacency commutator penalty,
-    \item a higher-order commutator cascade ($k = 2, \ldots, K$) capturing multi-hop structural differences,
-    \item a Grassmannian eigenspace alignment penalty based on Laplacian eigenspace projectors.
+    \item a degree-profile compatibility term (linear),
+    \item an adjacency mismatch penalty (quadratic).
 \end{enumerate}
 
 \subsection{Degree Profile Compatibility (Linear Term)}
@@ -61,71 +59,33 @@ The node-compatibility cost matrix is
     +
     \beta \left| s^A_i - s^B_j \right|,
 \end{equation}
-where $\alpha, \beta \ge 0$ are tunable weights. This penalizes mapping node $i$ in $G_1$ to node $j$ in $G_2$ when their local degree statistics differ. The linear objective term is:
+where $\alpha = 1.0$ and $\beta = 0.35$. This penalizes mapping node $i$ in $G_1$ to node $j$ in $G_2$ when their local degree statistics differ. The linear objective term is:
 \begin{equation}
     \mathcal{L}(\bm{X}) = \sum_{i=1}^{n} \sum_{j=1}^{n} C_{ij} X_{ij} = \langle \bm{C}, \bm{X} \rangle_F
 \end{equation}
 
 \subsection{Adjacency Mismatch (Quadratic Term)}
 
-For a true permutation matrix $\bm{P}$, the transformed adjacency would be $\bm{P}^\top \bm{A} \bm{P}$. We penalize the discrepancy between $\bm{A}$ transformed by $\bm{X}$ and $\bm{B}$ transformed by $\bm{X}$:
+For a true permutation matrix $\bm{P}$, the isomorphism condition requires $\bm{A}\bm{P} = \bm{P}\bm{B}$. We penalize the commutator residual:
 \begin{equation}
     \mathcal{Q}(\bm{X}) = \sum_{p=1}^{n} \sum_{q=1}^{n} \left( \sum_{k=1}^{n} A_{pk} X_{kq} - \sum_{k=1}^{n} X_{pk} B_{kq} \right)^2
 \end{equation}
 
-This can be written in matrix form. Let $\bm{R} = \bm{A}\bm{X} - \bm{X}\bm{B}$, then:
+In matrix form, let $\bm{R} = \bm{A}\bm{X} - \bm{X}\bm{B}$, then:
 \begin{equation}
     \mathcal{Q}(\bm{X}) = \|\bm{A}\bm{X} - \bm{X}\bm{B}\|_F^2 = \sum_{p,q} R_{pq}^2
 \end{equation}
 
 When $\bm{X} = \bm{P}$ is a valid isomorphism, we have $\bm{A}\bm{P} = \bm{P}\bm{B}$, hence $\mathcal{Q}(\bm{P}) = 0$.
 
-\subsection{Higher-Order Commutator Cascade}
-
-Direct adjacency alone does not fully capture local structure. Powers of the adjacency matrix encode $k$-hop walk counts: the entries of $\bm{A}^k$ count the number of walks of length $k$ between each pair of vertices. We add commutator penalties for powers $k = 2, \ldots, K$:
-\begin{equation}
-    \mathcal{T}(\bm{X}) = \sum_{k=2}^{K} \lambda_k \|\bm{A}^k \bm{X} - \bm{X}\bm{B}^k\|_F^2.
-\end{equation}
-
-If $\bm{X}=\bm{P}$ is an exact isomorphism then $\bm{A}^k \bm{P} = \bm{P}\bm{B}^k$ for all $k$, so $\mathcal{T}(\bm{P}) = 0$. The weights $\lambda_k$ decay with $k$ (default: $\lambda_2 = 0.20$, $\lambda_3 = 0.10$, $\lambda_4 = 0.05$, $\lambda_5 = 0.025$, $\lambda_6 = 0.012$) because higher powers amplify the spectral radius, requiring smaller weights to keep terms balanced.
-
-This cascade is critical for distinguishing strongly regular graphs with identical parameters $(n, k, \lambda, \mu)$, where the first- and second-order commutators alone provide no discrimination. For example, the Shrikhande graph and the $4 \times 4$ rook's graph---both $\text{srg}(16, 6, 2, 2)$---are distinguished at $k = 4$.
-
-\subsection{Grassmannian Eigenspace Alignment}
-
-Let the combinatorial Laplacians be
-\begin{equation}
-    \bm{L}_A = \operatorname{diag}(\bm{A}\bm{1}) - \bm{A},
-    \qquad
-    \bm{L}_B = \operatorname{diag}(\bm{B}\bm{1}) - \bm{B}.
-\end{equation}
-Compute the eigendecompositions $\bm{L}_A = \bm{U}_A \bm{\Lambda}_A \bm{U}_A^\top$ and $\bm{L}_B = \bm{U}_B \bm{\Lambda}_B \bm{U}_B^\top$. When a Laplacian has a repeated eigenvalue of multiplicity $m > 1$, the corresponding $m$-dimensional eigenspace has no canonical basis---any orthonormal basis is equally valid. Comparing raw eigenvector columns (even with sign normalization) therefore introduces spurious penalties and misleading gradient information.
-
-To resolve this, we compare \emph{eigenspaces} rather than individual eigenvectors. For each distinct eigenvalue cluster $\ell$ (grouped by proximity with tolerance $\epsilon$), let $\bm{U}_A^{(\ell)}$ denote the eigenvectors spanning that cluster and define the eigenspace projector:
-\begin{equation}
-    \bm{\Pi}_A^{(\ell)} = \bm{U}_A^{(\ell)} \left(\bm{U}_A^{(\ell)}\right)^\top,
-    \qquad
-    \bm{\Pi}_B^{(\ell)} = \bm{U}_B^{(\ell)} \left(\bm{U}_B^{(\ell)}\right)^\top.
-\end{equation}
-These projectors are invariant to rotations within degenerate eigenspaces, since $\bm{U}\bm{U}^\top$ does not depend on the choice of orthonormal basis for the column space.
-
-We penalize the commutator of the projectors with $\bm{X}$, weighted by eigenvalue magnitude $w_\ell = |\bar\lambda_\ell|$:
-\begin{equation}
-    \mathcal{S}(\bm{X}) = \sum_\ell w_\ell \left\| \bm{\Pi}_A^{(\ell)} \bm{X} - \bm{X} \bm{\Pi}_B^{(\ell)} \right\|_F^2.
-\end{equation}
-
-If $\bm{X} = \bm{P}$ is a valid isomorphism, then $\bm{\Pi}_A^{(\ell)} \bm{P} = \bm{P} \bm{\Pi}_B^{(\ell)}$ for every eigenspace $\ell$, so $\mathcal{S}(\bm{P}) = 0$. The trivial eigenspace corresponding to eigenvalue 0 (constant eigenvector) is excluded, as it provides no structural information.
-
 \section{Quadratic Program}
 
-The complete implemented optimization problem is:
+The complete optimization problem is:
 \begin{equation}
 \boxed{
 \begin{aligned}
     Z^* = \min_{\bm{X}} \quad & \mathcal{L}(\bm{X})
-    + \mathcal{Q}(\bm{X})
-    + \mathcal{T}(\bm{X})
-    + \lambda_S \mathcal{S}(\bm{X}) \\
+    + \mathcal{Q}(\bm{X}) \\
     \text{s.t.} \quad & \sum_{j=1}^{n} X_{ij} = 1 \quad \forall\, i \in \{1, \ldots, n\} \\
     & \sum_{i=1}^{n} X_{ij} = 1 \quad \forall\, j \in \{1, \ldots, n\} \\
     & X_{ij} \geq 0 \quad \forall\, i, j
@@ -133,22 +93,7 @@ The complete implemented optimization problem is:
 }
 \end{equation}
 
-Here $\lambda_k$ (inside $\mathcal{T}$) and $\lambda_S$ control the contribution of the commutator cascade and spectral penalties respectively. In the current codebase the default values are
-\begin{equation}
-    \alpha = 1.0, \quad \beta = 0.35, \quad
-    \lambda_2 = 0.20, \quad \lambda_3 = 0.10, \quad \lambda_4 = 0.05, \quad \lambda_5 = 0.025, \quad \lambda_6 = 0.012, \quad
-    \lambda_S = 0.15.
-\end{equation}
-
-The optimization remains a quadratic program over the Birkhoff polytope and is solved numerically with Gurobi.
-
-\subsection{Remark on Entropy Regularization}
-
-An additional entropy term,
-\begin{equation}
-    -\varepsilon \sum_{i,j} X_{ij}\log X_{ij},
-\end{equation}
-was proposed as a continuation-style regularizer to keep $\bm{X}$ diffuse early in the solve and help escape local minima. This term is \emph{not} currently implemented in the codebase, because it requires a different nonlinear or piecewise-linear treatment than the present quadratic formulation. A Sinkhorn warm-start strategy (solving a regularized assignment problem to initialize the QP) is a potential alternative that preserves the QP structure.
+The optimization is a quadratic program over the Birkhoff polytope and is solved numerically with Gurobi.
 
 \section{Isomorphism Index}
 
@@ -165,7 +110,7 @@ We define a normalized \textbf{Isomorphism Index} $I \in (0, 1]$:
 }
 \end{equation}
 
-where $\lambda > 0$ is a scaling parameter (default $\lambda = 0.1$). This maps the unbounded objective to a bounded similarity score:
+where $\lambda = 0.1$ is a scaling parameter. This maps the unbounded objective to a bounded similarity score:
 \begin{itemize}
     \item $I \approx 1$: Graphs are (likely) isomorphic
     \item $I \ll 1$: Graphs are structurally dissimilar
@@ -173,7 +118,7 @@ where $\lambda > 0$ is a scaling parameter (default $\lambda = 0.1$). This maps 
 
 \section{Post-Processing: Hungarian Rounding and Integer Verification}
 
-The isomorphism index $I$ is inherently a \emph{fuzzy} score: graphs with automorphisms can produce fractional $\bm{X}^*$ (the solver converges to the analytic center of a face of $\mathcal{B}_n$), yielding $Z^* > 0$ even for genuinely isomorphic graphs. To obtain a \textbf{provably correct binary answer}, we apply a two-step post-processing pipeline.
+The isomorphism index $I$ is a continuous heuristic score. To obtain a \textbf{provably correct binary answer}, we apply a two-step post-processing pipeline.
 
 \subsection{Hungarian Rounding}
 
@@ -185,31 +130,33 @@ where $\Pi_n$ is the set of $n \times n$ permutation matrices. This is equivalen
 
 \subsection{Integer Arithmetic Verification}
 
-Once $\bm{P}^*$ is obtained, we verify the isomorphism condition \emph{exactly} in integer arithmetic. Since the adjacency matrices $\bm{A}, \bm{B} \in \{0,1\}^{n \times n}$ and the permutation matrix $\bm{P}^* \in \{0,1\}^{n \times n}$ are all integer-valued, the residual
+Since $\bm{A}, \bm{B} \in \{0,1\}^{n \times n}$ and $\bm{P}^* \in \{0,1\}^{n \times n}$ are all integer-valued, the residual
 \begin{equation}
     \bm{R} = \bm{A}\bm{P}^* - \bm{P}^*\bm{B}
 \end{equation}
 can be computed without any floating-point error. The decision rule is:
 \begin{equation}
 \boxed{
-    \bm{R} = \bm{0} \implies \text{isomorphic}, \qquad
+    \bm{R} = \bm{0} \implies \text{isomorphic (proven)}, \qquad
     \bm{R} \neq \bm{0} \implies \text{inconclusive}
 }
 \end{equation}
 
-When $\bm{R} = \bm{0}$, the permutation $\bm{P}^*$ is a \emph{certificate} of isomorphism---the answer is exact. When $\bm{R} \neq \bm{0}$, the result is inconclusive rather than a definitive ``not isomorphic,'' because the Hungarian rounding may have selected the wrong permutation (e.g., if $\bm{X}^*$ was far from any correct permutation due to local minima).
+When $\bm{R} = \bm{0}$, the permutation $\bm{P}^*$ is a \emph{certificate} of isomorphism---the answer is exact. When $\bm{R} \neq \bm{0}$, the result is inconclusive: the graphs may still be isomorphic, but the solver failed to find the right permutation.
 
-\section{Interpretation of the Solution}
+\section{Summary}
 
-The solver produces three complementary outputs:
-\begin{itemize}
-    \item \textbf{Isomorphism index $I$}: A continuous similarity score. $I \approx 1$ suggests isomorphism; $I \ll 1$ suggests non-isomorphism. This is a heuristic with no formal threshold guarantee.
-    \item \textbf{Integer certificate}: A boolean flag from the Hungarian rounding + integer verification pipeline. When \texttt{true}, the graphs are \emph{provably} isomorphic. When \texttt{false}, the result is inconclusive.
-    \item \textbf{Soft assignment $\bm{X}^*$}: The doubly stochastic matrix representing the soft node correspondence. If $\bm{X}^*$ is near-binary, the relaxation is tight and the correspondence is sharp.
-\end{itemize}
+The pipeline has three stages:
+\begin{enumerate}
+    \item \textbf{QP Relaxation}: Solve for a soft permutation $\bm{X}^* \in \mathcal{B}_n$ that minimizes degree-profile cost plus adjacency mismatch.
+    \item \textbf{Hungarian Rounding}: Extract the nearest permutation matrix $\bm{P}^*$ from $\bm{X}^*$.
+    \item \textbf{Integer Verification}: Check $\bm{A}\bm{P}^* = \bm{P}^*\bm{B}$ exactly to get a provably correct answer.
+\end{enumerate}
+
+The solver produces three outputs: the continuous index $I$, the boolean certificate \texttt{is\_isomorphic}, and the soft assignment matrix $\bm{X}^*$.
 
 \section{Complexity}
 
-The QP has $n^2$ variables and $2n$ equality constraints. Modern interior-point solvers achieve polynomial complexity in practice, making this approach tractable for moderate graph sizes ($n \lesssim 100$).
+The QP has $n^2$ variables and $2n$ equality constraints. Modern interior-point solvers achieve polynomial complexity in practice, making this approach tractable for moderate graph sizes ($n \lesssim 100$). The Hungarian rounding adds $O(n^3)$ and the integer verification adds $O(n^2)$.
 
 \end{document}
