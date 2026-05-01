@@ -1,4 +1,4 @@
-"""Graph-pair generators used by the solver demos and benchmarks."""
+"""Graph-pair generators used by solver demos and experiments."""
 
 from __future__ import annotations
 
@@ -64,8 +64,8 @@ def make_isomorphic_pair(n, rng, density_range=DEFAULT_DENSITY_RANGE):
 def make_non_isomorphic_pair(n, rng, density_range=DEFAULT_DENSITY_RANGE):
     """Create two independently sampled graphs.
 
-    The result is probabilistically, not constructively, non-isomorphic.  Any
-    benchmark that needs ground truth should verify the pair with VF2/nauty.
+    The result is probabilistically, not constructively, non-isomorphic. Treat
+    the label as an experiment label unless an independent certificate is added.
     """
     m1 = _edge_count(n, rng, density_range)
     m2 = _edge_count(n, rng, density_range)

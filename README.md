@@ -20,16 +20,15 @@ exactly zero.
 - `isomorphism.py`: current source-of-truth solver.
 - `hyperplane_rounding.py`: SVD embedding plus random-hyperplane rounding.
 - `generators.py`: graph-pair generators used by experiments.
-- `main.py`: clean entry point for tests, single-case runs, small comparisons,
+- `main.py`: clean entry point for tests, single-case runs, small experiments,
   and matrix-viewer generation.
-- `big_benchmark.py`: benchmark against VF2, nauty, and bliss.
 - `matrix_viewer.py`: generates an HTML viewer from saved solver matrices.
 - `report.tex`: final dense report draft for presentation.
 - `theory.tex`: compact mathematical formulation.
 - `failure.tex`: failure modes and limitations appendix.
 
-Generated outputs such as `benchmark_data/`, `data/`, `compare_*`, HTML reports,
-and matrix JSON files are intentionally ignored by git.
+Generated outputs such as `data/`, `experiment_*`, `single_case_*`, HTML
+reports, and matrix JSON files are intentionally ignored by git.
 
 ## Setup
 
@@ -70,28 +69,16 @@ Run a single isomorphic test case and generate a matrix viewer:
 python main.py single --n 101
 ```
 
-Run a small comparison range:
+Run a small experiment range:
 
 ```bash
-python main.py compare --n-min 5 --n-max 30 --pairs 5
-```
-
-Run the larger benchmark:
-
-```bash
-python big_benchmark.py --sizes 50,60,70,80,90,100
-```
-
-Regenerate plots from existing run files:
-
-```bash
-python big_benchmark.py --plots-only
+python main.py experiment --n-min 5 --n-max 30 --pairs 5
 ```
 
 Generate a matrix viewer for an output directory:
 
 ```bash
-python main.py viewer --base-dir benchmark_data/matrices --output benchmark_matrix_viewer.html --hide-graphs
+python main.py viewer --base-dir data/matrices --output matrix_viewer.html --hide-graphs
 ```
 
 Use `--hide-graphs` for large `n`; the graph drawings are not useful at 80+
@@ -99,8 +86,8 @@ nodes, while the permutation matrix remains readable.
 
 ## Current Limitations
 
-- Non-isomorphic random pairs are sampled independently, so exact ground truth
-  should be verified with VF2/nauty/bliss.
+- Non-isomorphic random pairs are sampled independently, so their labels are
+  probabilistic experiment labels rather than formal certificates.
 - The relaxation can return diffuse matrices on symmetric or weakly identifiable
   cases.
 - Hyperplane rounding is heuristic. A failed certificate means "not certified",

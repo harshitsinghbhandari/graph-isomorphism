@@ -92,8 +92,10 @@ The generator for random pairs samples two graphs independently.
 For moderate and large $n$ this is almost surely non-isomorphic, but for small
 $n$ accidental isomorphism can happen.
 
-Therefore benchmark accuracy claims should use VF2, nauty, or bliss as the
-ground-truth label, not the generator name alone.
+Therefore the generator name should not be presented as a mathematical
+ground-truth proof.
+The presentation should call these random-pair experiments, not certified
+non-isomorphism instances.
 
 \section{Failure Mode 6: Scaling}
 
@@ -101,9 +103,9 @@ The model has $n^2$ continuous variables and $2n$ equality constraints.
 The current Python construction of the adjacency residual builds nested
 expressions over $(p,q,k)$, giving an $O(n^3)$ expression-building bottleneck.
 
-This is the practical reason the solver becomes expensive near 100 nodes,
-while VF2, nauty, and bliss remain extremely fast on the tested random dense
-instances.
+This is the practical reason the solver becomes expensive near 100 nodes.
+The bottleneck is our optimization formulation and model construction, not the
+matrix-viewer or graph generator.
 
 \section{Priority Fixes}
 
@@ -112,7 +114,7 @@ The most useful next improvements are:
     \item add stronger node compatibility features, especially WL colors;
     \item compare Hungarian and hyperplane rounding on the same saved $X^*$;
     \item normalize both objective terms across graph sizes;
-    \item add hard benchmark families beyond dense random graphs;
+    \item add hard graph families beyond dense random graphs;
     \item reduce model-building overhead for the adjacency residual.
 \end{enumerate}
 

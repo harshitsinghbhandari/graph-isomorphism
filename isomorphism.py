@@ -119,7 +119,7 @@ def compute_isomorphism_index(
     lambda_val: float = 0.1,
     base_dir: str = "data/matrices",
     solver_weights: dict[str, Any] | None = None,
-    comparison_type: str | None = None,
+    case_type: str | None = None,
 ) -> tuple[float | None, float | None, bool | None]:
     """Solve the relaxed GI objective and certify a rounded permutation.
 
@@ -219,8 +219,8 @@ def compute_isomorphism_index(
         "graph_b": _serialize_graph(G2),
         "weights": weights,
     }
-    if comparison_type:
-        result_entry["comparison_type"] = comparison_type
+    if case_type:
+        result_entry["case_type"] = case_type
 
     with open(file_path, "w") as f:
         json.dump(result_entry, f, indent=4)

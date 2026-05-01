@@ -79,7 +79,7 @@ def run_single(args: argparse.Namespace) -> int:
         graph_a,
         graph_b,
         base_dir=str(matrices_dir),
-        comparison_type="single_isomorphic_case",
+        case_type="single_isomorphic_case",
     )
     if z_star is None:
         raise RuntimeError("Solver returned no solution.")
@@ -111,8 +111,8 @@ def run_single(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_compare(args: argparse.Namespace) -> int:
-    """Run a small configurable benchmark and generate report/viewer artifacts."""
+def run_experiment(args: argparse.Namespace) -> int:
+    """Run a small configurable solver experiment and generate artifacts."""
     from generators import make_isomorphic_pair, make_non_isomorphic_pair
     from isomorphism import compute_isomorphism_index
     from matrix_viewer import generate_viewer, scan_matrices
@@ -137,7 +137,7 @@ def run_compare(args: argparse.Namespace) -> int:
     run_idx = 0
 
     print("=" * 64)
-    print("  CURRENT-SOLVER COMPARISON")
+    print("  CURRENT-SOLVER EXPERIMENT")
     print(f"  n          : {args.n_min}..{args.n_max}")
     print(f"  pairs      : {args.pairs} iso + {args.pairs} random per n")
     print(f"  density    : [{density_range[0]:.2f}, {density_range[1]:.2f}]")
@@ -159,7 +159,7 @@ def run_compare(args: argparse.Namespace) -> int:
                 graph_b,
                 lambda_val=args.lambda_val,
                 base_dir=str(matrices_dir),
-                comparison_type="isomorphic",
+                case_type="isomorphic",
             )
             elapsed = time.perf_counter() - start
             if z_star is not None:
@@ -183,7 +183,7 @@ def run_compare(args: argparse.Namespace) -> int:
                 graph_b,
                 lambda_val=args.lambda_val,
                 base_dir=str(matrices_dir),
-                comparison_type="random",
+                case_type="random",
             )
             elapsed = time.perf_counter() - start
             if z_star is not None:
@@ -289,12 +289,11 @@ def _print_command_table(console, Table) -> None:
     table.add_column("Command")
     table.add_row("Tests", "python main.py test")
     table.add_row("Single case", "python main.py single --n 101")
-    table.add_row("Small comparison", "python main.py compare --n-min 5 --n-max 30 --pairs 5")
+    table.add_row("Small experiment", "python main.py experiment --n-min 5 --n-max 30 --pairs 5")
     table.add_row(
         "Viewer",
-        "python main.py viewer --base-dir benchmark_data/matrices --output benchmark_matrix_viewer.html --hide-graphs",
+        "python main.py viewer --base-dir data/matrices --output matrix_viewer.html --hide-graphs",
     )
-    table.add_row("Large benchmark", "python big_benchmark.py --sizes 50,60,70,80,90,100")
     console.print(table)
 
 
@@ -318,7 +317,7 @@ def run_interactive(args: argparse.Namespace) -> int:
             choices=[
                 "Run tests",
                 "Run one isomorphic case",
-                "Run small comparison",
+                "Run small experiment",
                 "Build matrix viewer",
                 "Show command cheatsheet",
                 "Exit",
@@ -341,13 +340,13 @@ def run_interactive(args: argparse.Namespace) -> int:
                 values = _common_interactive_args(questionary, f"single_case_n{n}")
                 run_single(SimpleNamespace(n=n, **values))
 
-            elif choice == "Run small comparison":
+            elif choice == "Run small experiment":
                 n_min = _ask_int(questionary, "Minimum n", 5)
                 n_max = _ask_int(questionary, "Maximum n", 25)
                 pairs = _ask_int(questionary, "Pairs per type per n", 5)
                 lambda_val = _ask_float(questionary, "Index lambda", 0.1)
-                values = _common_interactive_args(questionary, f"compare_n{n_min}_{n_max}")
-                run_compare(
+                values = _common_interactive_args(questionary, f"experiment_n{n_min}_{n_max}")
+                run_experiment(
                     SimpleNamespace(
                         n_min=n_min,
                         n_max=n_max,
@@ -420,18 +419,18 @@ def build_parser() -> argparse.ArgumentParser:
     add_density_args(single_parser)
     single_parser.set_defaults(func=run_single)
 
-    compare_parser = subparsers.add_parser(
-        "compare", help="Run a small n-range benchmark and build reports"
+    experiment_parser = subparsers.add_parser(
+        "experiment", help="Run a small n-range solver experiment and build reports"
     )
-    compare_parser.add_argument("--n-min", type=int, default=5)
-    compare_parser.add_argument("--n-max", type=int, default=25)
-    compare_parser.add_argument("--pairs", type=int, default=5, help="Pairs per type per n")
-    compare_parser.add_argument("--seed", type=int, default=42)
-    compare_parser.add_argument("--lambda-val", type=float, default=0.1)
-    compare_parser.add_argument("--output-dir", default="compare_n5_25")
-    compare_parser.add_argument("--show-graphs", action="store_true")
-    add_density_args(compare_parser)
-    compare_parser.set_defaults(func=run_compare)
+    experiment_parser.add_argument("--n-min", type=int, default=5)
+    experiment_parser.add_argument("--n-max", type=int, default=25)
+    experiment_parser.add_argument("--pairs", type=int, default=5, help="Pairs per type per n")
+    experiment_parser.add_argument("--seed", type=int, default=42)
+    experiment_parser.add_argument("--lambda-val", type=float, default=0.1)
+    experiment_parser.add_argument("--output-dir", default="experiment_n5_25")
+    experiment_parser.add_argument("--show-graphs", action="store_true")
+    add_density_args(experiment_parser)
+    experiment_parser.set_defaults(func=run_experiment)
 
     viewer_parser = subparsers.add_parser(
         "viewer", help="Build an HTML matrix viewer from saved matrix JSON files"

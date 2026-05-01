@@ -3,7 +3,5 @@ matplotlib==3.10.7
 networkx==3.6.1
 numpy==2.4.4
 questionary==2.1.1
-python-igraph==1.0.0
-pynauty==2.8.8.1
 rich==14.2.0
 scipy==1.16.3

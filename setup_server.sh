@@ -17,7 +17,10 @@ Setup complete.
 Activate the environment with:
   source "${VENV_DIR}/bin/activate"
 
-Then run the benchmark with:
-  python big_benchmark.py
+Then open the interactive project CLI with:
+  python main.py
+
+Or run one isomorphic case with:
+  python main.py single --n 101
 
 EOF

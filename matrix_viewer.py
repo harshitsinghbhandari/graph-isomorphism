@@ -162,7 +162,7 @@ body {
   overflow: auto;
   padding: 1.5rem;
 }
-.comparison-layout {
+.case-layout {
   display: grid;
   grid-template-columns: minmax(280px, 1fr) minmax(360px, auto) minmax(280px, 1fr);
   gap: 1.5rem;
@@ -294,7 +294,7 @@ body {
 }
 
 @media (max-width: 1200px) {
-  .comparison-layout {
+  .case-layout {
     grid-template-columns: 1fr;
   }
 }
@@ -477,15 +477,15 @@ function renderGraphPanel(title, graph, emptyMessage) {
   `;
 }
 
-function normalizeComparisonType(file) {
-  if (file.comparison_type) return file.comparison_type;
-  return file.I > 0.9 ? 'isomorphic (inferred)' : 'non-isomorphic (inferred)';
+function normalizeCaseType(file) {
+  if (file.case_type) return file.case_type;
+  return 'unspecified';
 }
 
-function getComparisonResult(file) {
-  const isIsomorphic = file.I > 0.9;
+function getCertificateResult(file) {
+  const isIsomorphic = file.is_isomorphic === true;
   return {
-    label: isIsomorphic ? 'matched as isomorphic' : 'matched as non-isomorphic',
+    label: isIsomorphic ? 'certified by AP = PB' : 'not certified',
     className: isIsomorphic ? 'good' : 'bad',
   };
 }
@@ -498,8 +498,8 @@ function renderMatrix(n, file) {
   title.textContent = `Matrix n=${n}`;
 
   const iScore = file.I;
-  const expectedType = normalizeComparisonType(file);
-  const comparisonResult = getComparisonResult(file);
+  const expectedType = normalizeCaseType(file);
+  const certificateResult = getCertificateResult(file);
 
   meta.innerHTML = `
     <div class="meta-item">
@@ -508,11 +508,11 @@ function renderMatrix(n, file) {
     </div>
     <div class="meta-item">
       <span class="meta-label">Result:</span>
-      <span class="meta-value ${comparisonResult.className}">${comparisonResult.label}</span>
+      <span class="meta-value ${certificateResult.className}">${certificateResult.label}</span>
     </div>
     <div class="meta-item">
       <span class="meta-label">I =</span>
-      <span class="meta-value ${comparisonResult.className}">${iScore.toFixed(6)}</span>
+      <span class="meta-value neutral">${iScore.toFixed(6)}</span>
     </div>
     <div class="meta-item">
       <span class="meta-label">Z* =</span>
@@ -565,14 +565,14 @@ function renderMatrix(n, file) {
 
   if (SHOW_GRAPHS) {
     container.innerHTML = `
-      <div class="comparison-layout">
-        ${renderGraphPanel('Graph A', file.graph_a, 'Graph A not stored in this result. Rerun the benchmark to embed graph snapshots.')}
+      <div class="case-layout">
+        ${renderGraphPanel('Graph A', file.graph_a, 'Graph A not stored in this result. Rerun the experiment to embed graph snapshots.')}
         <div class="panel">
           <div class="panel-title">Permutation Matrix P</div>
           <div class="panel-subtitle">${size} × ${size}</div>
           ${html}
         </div>
-        ${renderGraphPanel('Graph B', file.graph_b, 'Graph B not stored in this result. Rerun the benchmark to embed graph snapshots.')}
+        ${renderGraphPanel('Graph B', file.graph_b, 'Graph B not stored in this result. Rerun the experiment to embed graph snapshots.')}
       </div>
     `;
   } else {

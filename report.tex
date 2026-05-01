@@ -29,13 +29,10 @@ commutator objective, rounds the relaxed matrix with a hyperplane method, and
 accepts an isomorphism only when the rounded permutation passes the exact
 integer check $AP = PB$.
 
-The central result of Phase 1 is not that the method beats mature exact
-isomorphism tools.
-It does not.
-The useful result is narrower: the relaxation gives an interpretable soft
-correspondence matrix, the degree-profile term improves separation over an
-adjacency-only objective, and the current bottleneck is now clearly located in
-rounding quality and solver scaling.
+The central result of Phase 1 is intentionally narrow: the relaxation gives an
+interpretable soft correspondence matrix, the degree-profile term improves
+separation over an adjacency-only objective, and the current bottleneck is now
+clearly located in rounding quality and solver scaling.
 \end{abstract}
 
 \tableofcontents
@@ -190,7 +187,7 @@ similarity score
 \end{equation}
 with default $\lambda=0.1$.
 
-This index is useful for plots and comparisons.
+This index is useful for plots and experiment summaries.
 It is not a proof.
 
 The correct interpretation is:
@@ -237,7 +234,7 @@ from $X^*$ into a discrete matching problem.
 
 \subsection{Hungarian Baseline}
 
-Hungarian rounding remains an important comparison baseline.
+Hungarian rounding remains an important internal rounding baseline.
 Given $X^*$, it directly finds a high-weight permutation under the assignment
 cost $1-X^*$.
 
@@ -264,40 +261,43 @@ This is the key distinction:
 
 The current method can prove isomorphism when rounding succeeds.
 It does not prove non-isomorphism when rounding fails.
-For benchmark labels, exact tools such as VF2, nauty, or bliss are used as
-reference implementations.
 
-\section{Benchmarking}
+\section{Experiment Workflow}
 
-\subsection{Large Benchmark Script}
+The presentation branch keeps the experiment workflow focused on our method.
+The relevant entry point is \texttt{main.py}.
 
-\texttt{big\_benchmark.py} compares four algorithms:
-\begin{itemize}[leftmargin=*]
-    \item \texttt{ours}: QP relaxation plus hyperplane rounding.
-    \item \texttt{vf2}: NetworkX VF2.
-    \item \texttt{nauty}: \texttt{pynauty}.
-    \item \texttt{bliss}: igraph bliss.
-\end{itemize}
+\subsection{Single Isomorphic Case}
 
-The server benchmark configuration uses:
-\begin{itemize}[leftmargin=*]
-    \item 10 isomorphic pairs per graph size.
-    \item 15 random pairs per graph size.
-    \item graph sizes between 20 and 150 by default.
-    \item random density sampled between 40\% and 85\%.
-\end{itemize}
+The command
+\begin{quote}
+\texttt{python main.py single --n 101}
+\end{quote}
+generates one clearly isomorphic pair, solves the relaxation, rounds the
+solution, checks $AP^*=P^*B$, and writes a matrix viewer.
+This is the best demonstration path because the expected positive certificate
+is known from construction.
 
-The benchmark writes resumable per-run JSON files under
-\texttt{benchmark\_data/runs}.
-This is necessary because the QP path is much slower than VF2, nauty, and bliss.
+\subsection{Small Range Experiment}
+
+The command
+\begin{quote}
+\texttt{python main.py experiment --n-min 5 --n-max 30 --pairs 5}
+\end{quote}
+runs the current solver on isomorphic and independently sampled random pairs.
+It records $Z^*$, $I$, runtime, certificate counts, an HTML report, and a
+matrix viewer.
+
+The random-pair label is an experiment label, not a proof.
+For moderate and large $n$, independently sampled dense graphs are almost
+surely non-isomorphic, but the solver's only formal positive statement remains
+the rounded certificate check.
 
 \subsection{Observed Runtime Pattern}
 
-The exact tools are extremely fast on the dense random cases used so far.
 The QP solver dominates runtime and memory.
-
-A practical observation from the server run was that around $n=50$, the QP path
-was already taking about 11--12 seconds per random pair.
+A practical observation from the server run was that around $n=50$, the current
+QP path was already taking about 11--12 seconds per random pair.
 Scaling to $n=100$ or beyond becomes expensive because the model contains
 $n^2$ variables and builds $O(n^3)$ linear expression terms inside the quadratic
 adjacency residual.
@@ -343,12 +343,12 @@ consider the typical magnitude of $\|AX-XB\|_F^2$ as $n$ changes.
 Hyperplane rounding can miss a valid isomorphism even when one exists.
 The result is then inconclusive, not a proof of non-isomorphism.
 
-\subsection{Benchmark Labels}
+\subsection{Random-Pair Labels}
 
 Random independently sampled graph pairs are almost surely non-isomorphic for
 moderate $n$, but not guaranteed.
-Small-$n$ experiments must verify labels with exact tools before drawing
-accuracy conclusions.
+The report should therefore treat them as random-pair experiments, not formal
+non-isomorphism certificates.
 
 \section{What Phase 1 Establishes}
 
@@ -364,7 +364,6 @@ Phase 1 establishes a working and defensible pipeline:
 
 It also establishes the limits of the current version:
 \begin{enumerate}[leftmargin=*]
-    \item exact solvers are much faster on the tested random dense cases;
     \item the QP construction is the runtime bottleneck;
     \item degree features are useful but weak;
     \item rounding quality is still an open research component.
@@ -376,18 +375,17 @@ The clean next additions are:
 \begin{itemize}[leftmargin=*]
     \item WL-based node compatibility features;
     \item stronger scaling between objective terms;
-    \item Hungarian-vs-hyperplane rounding comparison on the same saved $X^*$;
+    \item Hungarian-vs-hyperplane rounding study on the same saved $X^*$;
     \item structured hard graph families beyond dense random graphs;
     \item a faster model construction path for the adjacency residual.
 \end{itemize}
 
 \section{Conclusion}
 
-The current project should be presented as a research prototype, not as a
-replacement for VF2, nauty, or bliss.
-Its value is that it makes graph isomorphism visible as an optimization problem:
-the soft matrix $X^*$, the objective components, and the rounded certificate all
-expose where the method succeeds or fails.
+The current project should be presented as a research prototype.
+Its value is that it makes graph isomorphism visible as an optimization
+problem: the soft matrix $X^*$, the objective components, and the rounded
+certificate all expose where the method succeeds or fails.
 
 The strongest Phase 1 claim is therefore precise:
 adding the degree-profile term improves the relaxed objective's separation over
