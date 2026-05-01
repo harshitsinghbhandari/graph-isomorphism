@@ -12,64 +12,19 @@ DEFAULT_SOLVER_WEIGHTS = {
         "degree": 1.0,
         "neighbor_degree": 0.35,
     },
-    "commutator_powers": {
-        2: 0.20,
-        3: 0.10,
-        4: 0.05,
-        5: 0.025,
-        6: 0.012,
-    },
-    "spectral": 0.15,
 }
 
 
 def _merge_solver_weights(solver_weights):
     merged = {
         "degree_profile": dict(DEFAULT_SOLVER_WEIGHTS["degree_profile"]),
-        "commutator_powers": dict(DEFAULT_SOLVER_WEIGHTS["commutator_powers"]),
-        "spectral": DEFAULT_SOLVER_WEIGHTS["spectral"],
     }
     if not solver_weights:
         return merged
 
     if "degree_profile" in solver_weights:
         merged["degree_profile"].update(solver_weights["degree_profile"])
-    if "commutator_powers" in solver_weights:
-        merged["commutator_powers"].update(solver_weights["commutator_powers"])
-    # backward compat: old "two_hop" key maps to commutator_powers[2]
-    if "two_hop" in solver_weights and "commutator_powers" not in solver_weights:
-        merged["commutator_powers"] = {2: solver_weights["two_hop"]}
-    if "spectral" in solver_weights:
-        merged["spectral"] = solver_weights["spectral"]
     return merged
-
-
-def _eigenspace_projectors(adj, degeneracy_tol=1e-6):
-    """Compute eigenspace projection operators for the graph Laplacian.
-
-    Returns a list of (projector, weight) tuples, one per eigenvalue cluster.
-    This is invariant to rotations within degenerate eigenspaces, fixing the
-    eigenvector sign/basis ambiguity problem.
-    """
-    degrees = np.sum(adj, axis=1)
-    laplacian = np.diag(degrees) - adj
-    eigenvalues, eigenvectors = np.linalg.eigh(laplacian)
-
-    projectors = []
-    i = 0
-    n = len(eigenvalues)
-    while i < n:
-        j = i + 1
-        while j < n and abs(eigenvalues[j] - eigenvalues[i]) < degeneracy_tol:
-            j += 1
-        U_cluster = eigenvectors[:, i:j]
-        Pi = U_cluster @ U_cluster.T
-        weight = abs(np.mean(eigenvalues[i:j]))
-        if weight > 1e-10:  # skip trivial zero-eigenvalue eigenspace
-            projectors.append((Pi, weight))
-        i = j
-
-    return projectors
 
 
 def _degree_cost_matrix(A, B, degree_weight, neighbor_degree_weight):
@@ -148,19 +103,6 @@ def compute_isomorphism_index(
         degree_weights["degree"],
         degree_weights["neighbor_degree"],
     )
-    # Precompute matrix powers for commutator terms
-    commutator_powers = weights["commutator_powers"]
-    max_k = max(commutator_powers.keys()) if commutator_powers else 1
-    A_powers = {1: A}
-    B_powers = {1: B}
-    for k in range(2, max_k + 1):
-        A_powers[k] = A_powers[k - 1] @ A
-        B_powers[k] = B_powers[k - 1] @ B
-
-    # Grassmannian eigenspace projectors (rotation-invariant spectral term)
-    projectors_A = _eigenspace_projectors(A)
-    projectors_B = _eigenspace_projectors(B)
-
     model = gp.Model("IsomorphismIndex")
     model.setParam('OutputFlag', 0)
     model.setParam('TimeLimit', 120)
@@ -180,36 +122,7 @@ def compute_isomorphism_index(
             diff_expr = gp.quicksum(A[p, k] * X[k, q] - X[p, k] * B[k, q] for k in range(n))
             adjacency_part += diff_expr * diff_expr
 
-    # Higher-order commutator terms: ||A^k X - X B^k||_F^2 for k=2..K
-    commutator_part = 0
-    for k, w_k in commutator_powers.items():
-        if w_k:
-            Ak = A_powers[k]
-            Bk = B_powers[k]
-            for p in range(n):
-                for q in range(n):
-                    diff_expr = gp.quicksum(Ak[p, m] * X[m, q] - X[p, m] * Bk[m, q] for m in range(n))
-                    commutator_part += w_k * diff_expr * diff_expr
-
-    # Grassmannian eigenspace alignment: ||Pi_A X - X Pi_B||_F^2
-    grassmannian_part = 0
-    if weights["spectral"]:
-        n_clusters = min(len(projectors_A), len(projectors_B))
-        for l in range(n_clusters):
-            Pi_A, w_A = projectors_A[l]
-            Pi_B, w_B = projectors_B[l]
-            w_l = (w_A + w_B) / 2.0
-            for p in range(n):
-                for q in range(n):
-                    diff_expr = gp.quicksum(
-                        Pi_A[p, m] * X[m, q] - X[p, m] * Pi_B[m, q]
-                        for m in range(n)
-                    )
-                    grassmannian_part += w_l * diff_expr * diff_expr
-
     objective = linear_part + adjacency_part
-    objective += commutator_part
-    objective += weights["spectral"] * grassmannian_part
 
     model.setObjective(objective, GRB.MINIMIZE)
     model.optimize()
