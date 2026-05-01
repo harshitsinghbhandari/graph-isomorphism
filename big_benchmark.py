@@ -1,16 +1,14 @@
-"""big_benchmark.py - QP+hyperplane vs VF2 / nauty / bliss across n=5..100.
+"""big_benchmark.py - QP+hyperplane vs VF2 / nauty / bliss across n=20..150.
 
 Sizes
 -----
-    n in {5..20}                         (16 sizes, every integer)
-    n in {30, 40, 50, 60, 70, 80, 90, 100}   (8 sizes)
-    => 24 sizes
+    n in {20, 30, 40, ..., 150}         (14 sizes)
 
 Pairs per n
 -----------
-    5 isomorphic pairs (label: "iso")
-    7 random pairs     (label: "random" - VF2 is treated as ground truth)
-    => 12 pairs per n -> 288 pairs total
+    10 isomorphic pairs (label: "iso")
+    15 random pairs     (label: "random" - VF2 is treated as ground truth)
+    => 25 pairs per n -> 350 pairs total
 
 Algorithms run on each pair
 ---------------------------
@@ -19,7 +17,7 @@ Algorithms run on each pair
     nauty  : pynauty.isomorphic (canonical labelling)
     bliss  : igraph.Graph.isomorphic_bliss
 
-=> 288 * 4 = 1152 individual runs.
+=> 350 * 4 = 1400 individual runs.
 
 Disk layout (everything saved, nothing reused)
 ----------------------------------------------
@@ -40,11 +38,13 @@ Resume semantics
 Common flags
 ------------
     --algos ours,vf2,nauty,bliss     subset of algorithms (default: all)
-    --sizes 5,6,...,100              override the size schedule
-    --max-n 50                       cap the largest n (use to skip n=60..100)
+    --sizes 20,30,...,150            override the size schedule
+    --max-n 80                       cap the largest n
     --plots-only                     skip benchmarking, just rebuild plots
     --regenerate-graphs              wipe graphs.json and resample pairs
     --seed 42                        RNG seed for reproducible pairs
+    --density-min 0.40               minimum graph density
+    --density-max 0.85               maximum graph density
 """
 
 from __future__ import annotations
@@ -94,10 +94,12 @@ from generators import make_isomorphic_pair, make_non_isomorphic_pair
 # Constants                                                                   #
 # --------------------------------------------------------------------------- #
 
-SIZES_DEFAULT: list[int] = list(range(5, 21)) + list(range(30, 101, 10))
-ISO_PAIRS_PER_N = 5
-RAND_PAIRS_PER_N = 7
+SIZES_DEFAULT: list[int] = list(range(20, 151, 10))
+ISO_PAIRS_PER_N = 10
+RAND_PAIRS_PER_N = 15
 ALL_ALGOS = ["ours", "vf2", "nauty", "bliss"]
+DEFAULT_DENSITY_MIN = 0.40
+DEFAULT_DENSITY_MAX = 0.85
 
 OUT_DIR = Path("benchmark_data")
 GRAPHS_PATH = OUT_DIR / "graphs.json"
@@ -128,12 +130,14 @@ def _relabel_to_zero_based(G: nx.Graph) -> nx.Graph:
     return nx.relabel_nodes(G, mapping)
 
 
-def generate_all_pairs(sizes: list[int], seed: int) -> list[dict[str, Any]]:
+def generate_all_pairs(
+    sizes: list[int], seed: int, density_range: tuple[float, float]
+) -> list[dict[str, Any]]:
     rng = np.random.default_rng(seed)
     pairs: list[dict[str, Any]] = []
     for n in sizes:
         for k in range(ISO_PAIRS_PER_N):
-            G1, G2 = make_isomorphic_pair(n, rng)
+            G1, G2 = make_isomorphic_pair(n, rng, density_range=density_range)
             G1 = _relabel_to_zero_based(G1)
             G2 = _relabel_to_zero_based(G2)
             pairs.append(
@@ -141,12 +145,13 @@ def generate_all_pairs(sizes: list[int], seed: int) -> list[dict[str, Any]]:
                     "n": int(n),
                     "pair_idx": int(k),
                     "kind": "iso",
+                    "density_range": [float(density_range[0]), float(density_range[1])],
                     "edges_a": _edge_list(G1),
                     "edges_b": _edge_list(G2),
                 }
             )
         for k in range(RAND_PAIRS_PER_N):
-            G1, G2 = make_non_isomorphic_pair(n, rng)
+            G1, G2 = make_non_isomorphic_pair(n, rng, density_range=density_range)
             G1 = _relabel_to_zero_based(G1)
             G2 = _relabel_to_zero_based(G2)
             pairs.append(
@@ -154,6 +159,7 @@ def generate_all_pairs(sizes: list[int], seed: int) -> list[dict[str, Any]]:
                     "n": int(n),
                     "pair_idx": int(k),
                     "kind": "random",
+                    "density_range": [float(density_range[0]), float(density_range[1])],
                     "edges_a": _edge_list(G1),
                     "edges_b": _edge_list(G2),
                 }
@@ -162,21 +168,31 @@ def generate_all_pairs(sizes: list[int], seed: int) -> list[dict[str, Any]]:
 
 
 def load_or_generate_pairs(
-    sizes: list[int], seed: int, regenerate: bool
+    sizes: list[int],
+    seed: int,
+    regenerate: bool,
+    density_range: tuple[float, float],
 ) -> list[dict[str, Any]]:
     if GRAPHS_PATH.exists() and not regenerate:
         with open(GRAPHS_PATH) as f:
             pairs = json.load(f)
         existing_sizes = sorted({p["n"] for p in pairs})
-        if existing_sizes == sorted(sizes):
-            print(f"  Reusing {len(pairs)} pairs from {GRAPHS_PATH}")
-            return pairs
+        existing_density = tuple(pairs[0].get("density_range", density_range)) if pairs else density_range
+        requested_sizes = sorted(sizes)
+        if existing_density == density_range and set(requested_sizes).issubset(existing_sizes):
+            filtered_pairs = [p for p in pairs if p["n"] in set(requested_sizes)]
+            print(
+                f"  Reusing {len(filtered_pairs)} pairs from {GRAPHS_PATH} "
+                f"(available sizes {existing_sizes}; requested {requested_sizes})"
+            )
+            return filtered_pairs
         print(
             f"  Existing graphs.json covers sizes {existing_sizes}, "
-            f"requested {sorted(sizes)}. Regenerating."
+            f"requested {sorted(sizes)}; density={existing_density}, "
+            f"requested density={density_range}. Regenerating."
         )
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    pairs = generate_all_pairs(sizes, seed)
+    pairs = generate_all_pairs(sizes, seed, density_range)
     with open(GRAPHS_PATH, "w") as f:
         json.dump(pairs, f)
     print(f"  Wrote {len(pairs)} pairs to {GRAPHS_PATH}")
@@ -473,6 +489,9 @@ def _save(fig, name: str) -> None:
 def plot_time_vs_n(summary: dict[str, Any]) -> None:
     sizes = summary["sizes"]
     algos = summary["algorithms"]
+    if not algos or not sizes:
+        print("  (no run data; skipping time_vs_n plot)")
+        return
     fig, ax = plt.subplots(figsize=(9, 5))
     for algo in algos:
         ys = []
@@ -492,13 +511,17 @@ def plot_time_vs_n(summary: dict[str, Any]) -> None:
     ax.set_yscale("log")
     ax.set_title("Time per pair vs n  (mean over 12 pairs/n; log y)")
     ax.grid(True, which="both", linestyle=":", alpha=0.5)
-    ax.legend()
+    if ax.lines:
+        ax.legend()
     _save(fig, "time_vs_n.png")
 
 
 def plot_certificate_rate_iso(summary: dict[str, Any]) -> None:
     sizes = summary["sizes"]
     algos = summary["algorithms"]
+    if not algos or not sizes:
+        print("  (no run data; skipping certificate_rate_iso plot)")
+        return
     fig, ax = plt.subplots(figsize=(9, 5))
     for algo in algos:
         ys = []
@@ -513,7 +536,8 @@ def plot_certificate_rate_iso(summary: dict[str, Any]) -> None:
     ax.set_ylim(-0.02, 1.05)
     ax.set_title("Iso-pair certificate rate vs n  (5 pairs/n)")
     ax.grid(True, linestyle=":", alpha=0.5)
-    ax.legend()
+    if ax.lines:
+        ax.legend()
     _save(fig, "certificate_rate_iso.png")
 
 
@@ -522,6 +546,9 @@ def plot_iso_rate_random(summary: dict[str, Any]) -> None:
     Treat VF2 as ground truth; the gap between curves and VF2 is the FP rate."""
     sizes = summary["sizes"]
     algos = summary["algorithms"]
+    if not algos or not sizes:
+        print("  (no run data; skipping iso_rate_random plot)")
+        return
     fig, ax = plt.subplots(figsize=(9, 5))
     for algo in algos:
         ys = []
@@ -536,13 +563,17 @@ def plot_iso_rate_random(summary: dict[str, Any]) -> None:
     ax.set_ylim(-0.02, 1.05)
     ax.set_title("Iso-rate on random pairs vs n  (7 pairs/n; gap to VF2 ~ FP)")
     ax.grid(True, linestyle=":", alpha=0.5)
-    ax.legend()
+    if ax.lines:
+        ax.legend()
     _save(fig, "iso_rate_random.png")
 
 
 def plot_agreement(summary: dict[str, Any]) -> None:
     agree = summary["agreement_vs_vf2"]
     algos = list(agree.keys())
+    if not algos:
+        print("  (no run data; skipping agreement_vs_vf2 plot)")
+        return
     fractions = []
     for algo in algos:
         a = agree[algo]
@@ -560,6 +591,9 @@ def plot_agreement(summary: dict[str, Any]) -> None:
 
 def plot_confusion(summary: dict[str, Any]) -> None:
     algos = summary["algorithms"]
+    if not algos:
+        print("  (no run data; skipping confusion plot)")
+        return
     M = np.array(
         [[summary["confusion"][a][b] for b in algos] for a in algos], dtype=float
     )
@@ -627,6 +661,9 @@ def plot_z_star_vs_n(runs: list[dict[str, Any]]) -> None:
 
 def plot_total_time_per_algo(summary: dict[str, Any]) -> None:
     algos = summary["algorithms"]
+    if not algos:
+        print("  (no run data; skipping total_time_per_algo plot)")
+        return
     totals = []
     for algo in algos:
         t = 0.0
@@ -680,6 +717,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="skip benchmarking, regenerate plots from existing runs")
     p.add_argument("--regenerate-graphs", action="store_true",
                    help="wipe graphs.json and resample pairs")
+    p.add_argument("--density-min", type=float, default=DEFAULT_DENSITY_MIN,
+                   help=f"minimum graph density (default: {DEFAULT_DENSITY_MIN})")
+    p.add_argument("--density-max", type=float, default=DEFAULT_DENSITY_MAX,
+                   help=f"maximum graph density (default: {DEFAULT_DENSITY_MAX})")
     return p.parse_args(argv)
 
 
@@ -692,6 +733,10 @@ def main(argv: list[str] | None = None) -> None:
         sizes = list(SIZES_DEFAULT)
     if args.max_n is not None:
         sizes = [s for s in sizes if s <= args.max_n]
+    density_range = (args.density_min, args.density_max)
+    if not (0.0 <= density_range[0] <= density_range[1] <= 1.0):
+        print(f"invalid density range: {density_range}", file=sys.stderr)
+        sys.exit(2)
 
     algos = [a.strip() for a in args.algos.split(",") if a.strip()]
     for a in algos:
@@ -705,6 +750,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Algorithms : {algos}")
     print(f"  Pairs/n    : {ISO_PAIRS_PER_N} iso + {RAND_PAIRS_PER_N} random = "
           f"{ISO_PAIRS_PER_N + RAND_PAIRS_PER_N}")
+    print(f"  Density    : [{density_range[0]:.2f}, {density_range[1]:.2f}]")
     print(f"  Total runs : {len(sizes) * (ISO_PAIRS_PER_N + RAND_PAIRS_PER_N) * len(algos)}")
     print(f"  Output     : {OUT_DIR}/")
     print(f"  pynauty    : {'yes' if HAVE_NAUTY else 'NO'}")
@@ -713,7 +759,9 @@ def main(argv: list[str] | None = None) -> None:
     print("=" * 64)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    pairs = load_or_generate_pairs(sizes, args.seed, args.regenerate_graphs)
+    pairs = load_or_generate_pairs(
+        sizes, args.seed, args.regenerate_graphs, density_range
+    )
 
     if not args.plots_only:
         execute_benchmark(pairs, algos)
