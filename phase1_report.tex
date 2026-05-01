@@ -1,0 +1,542 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=blue!60!black
+}
+
+\title{\textbf{Phase 1 Report: Continuous Relaxation and Rounding for Graph Isomorphism}}
+\author{}
+\date{Codebase-grounded draft, 2026-05-01}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report documents the current state of a graph isomorphism pipeline implemented in this repository.
+The codebase, not earlier theory drafts, is treated as the source of truth.
+
+The implemented system solves a continuous relaxation of the permutation search problem over the Birkhoff polytope,
+uses a quadratic commutator penalty to reward structure-preserving correspondences,
+adds a degree-profile compatibility term to sharpen the landscape,
+and converts the relaxed solution into a permutation candidate through rounding.
+
+The report has four goals.
+First, formalize the implemented objective.
+Second, justify why the relaxation is useful.
+Third, compare adjacency-only matching against the current degree-augmented objective.
+Fourth, position Hungarian rounding and hyperplane rounding within the present pipeline.
+
+All numerical comparisons in this report were re-run from the current repository on 2026-05-01.
+The main conclusion of Phase 1 is that the degree-profile term is already doing real work:
+it dramatically improves separation on verified non-isomorphic random pairs while leaving solve times essentially unchanged.
+The current active solver now uses hyperplane rounding rather than Hungarian rounding inside the main pipeline.
+However, on the tested reruns, hyperplane rounding has not yet outperformed an offline Hungarian comparison baseline on the saved relaxed matrices.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+
+Given two simple undirected graphs $G_1 = (V_1, E_1)$ and $G_2 = (V_2, E_2)$ with the same number of vertices,
+the graph isomorphism problem asks whether there exists a relabeling of the vertices of $G_1$ that makes its edge set identical to that of $G_2$.
+
+If $A$ and $B$ denote the adjacency matrices of the two graphs,
+then an isomorphism can be represented by a permutation matrix $P$ satisfying
+\begin{equation}
+AP = PB
+\end{equation}
+or equivalently
+\begin{equation}
+P^\top A P = B.
+\end{equation}
+
+The discrete search space has size $n!$.
+That is the central obstacle.
+
+The approach implemented here replaces the discrete search over permutation matrices with a continuous optimization over doubly stochastic matrices.
+The optimization returns a soft correspondence matrix $X^*$.
+That matrix is then rounded into a permutation candidate and checked exactly in integer arithmetic.
+
+This report focuses on the Phase 1 version of that idea.
+It does not describe a hypothetical future solver.
+It documents what is currently implemented, what the current comparisons show, and where the next additions naturally fit.
+
+\section{Graph Isomorphism as a Permutation Problem}
+
+Let $A, B \in \{0,1\}^{n \times n}$ be the adjacency matrices of two graphs on $n$ vertices.
+For a permutation matrix $P \in \{0,1\}^{n \times n}$,
+the identity $AP = PB$ means that column $j$ of $P$ selects the image of vertex $j$ under the candidate relabeling.
+
+This formulation is attractive because it expresses isomorphism as a rigid algebraic condition.
+If a correct $P$ exists, the graphs are isomorphic.
+If no such $P$ exists, they are not.
+
+The difficulty is combinatorial.
+The feasible set of permutation matrices is finite but enormous.
+Even moderate graph sizes rule out brute-force enumeration.
+
+This motivates relaxation.
+Instead of insisting that every row and every column of the decision matrix contain exactly one binary $1$,
+we first allow the mass to spread continuously.
+The hope is that the geometry of the relaxed problem still points toward useful permutations.
+
+\section{Why Relaxation}
+
+\subsection{Birkhoff Polytope}
+
+A matrix $X \in \mathbb{R}^{n \times n}$ is doubly stochastic if
+\begin{equation}
+X_{ij} \ge 0, \qquad \sum_{j=1}^{n} X_{ij} = 1 \ \forall i, \qquad \sum_{i=1}^{n} X_{ij} = 1 \ \forall j.
+\end{equation}
+
+The set of all such matrices is the Birkhoff polytope $\mathcal{B}_n$.
+Its vertices are exactly the permutation matrices.
+
+That fact is the structural reason the relaxation is meaningful.
+The continuous feasible region still contains the discrete solutions we ultimately care about.
+
+\subsection{Interpretation}
+
+The relaxed variable $X$ is best viewed as a soft correspondence matrix.
+Row $i$ describes how strongly vertex $i$ in $G_1$ is matched to each vertex of $G_2$.
+If $X$ lands on a permutation vertex, the matching is sharp.
+If $X$ remains fractional, the solver has found ambiguity, symmetry, or a poor local explanation.
+
+This interpretation is useful in two ways.
+First, it turns the discrete search into a smooth numerical optimization problem.
+Second, it gives an intermediate object that can be studied even when exact certification fails.
+
+\section{Implemented Phase 1 Objective}
+
+The current code in \texttt{isomorphism.py} implements two signals:
+\begin{enumerate}[label=\arabic*.]
+    \item a linear degree-profile compatibility term, and
+    \item a quadratic adjacency commutator penalty.
+\end{enumerate}
+
+No higher-order walk term, spectral penalty, or entropy regularization is currently present in the active solver.
+Those belong to future phases, not to the present source-of-truth formulation.
+
+\subsection{Adjacency Commutator}
+
+The structural core of the objective is
+\begin{equation}
+\mathcal{Q}(X) = \|AX - XB\|_F^2.
+\end{equation}
+
+This term is directly motivated by the exact permutation condition.
+If $X = P$ is a correct permutation matrix, then $AP = PB$ and hence $\mathcal{Q}(P) = 0$.
+
+That makes $\mathcal{Q}$ the natural baseline objective.
+It is symmetric, concise, and tied directly to the algebra of isomorphism.
+
+\subsection{Degree-Profile Compatibility}
+
+The current solver also computes the degree vectors
+\begin{equation}
+d^A_i = \sum_k A_{ik}, \qquad d^B_j = \sum_k B_{jk},
+\end{equation}
+and the one-hop neighbor-degree summaries
+\begin{equation}
+s^A_i = \sum_k A_{ik} d^A_k, \qquad s^B_j = \sum_k B_{jk} d^B_k.
+\end{equation}
+
+These define the cost matrix
+\begin{equation}
+C_{ij} = \alpha |d^A_i - d^B_j| + \beta |s^A_i - s^B_j|,
+\end{equation}
+with current code-level weights
+\begin{equation}
+\alpha = 1.0, \qquad \beta = 0.35.
+\end{equation}
+
+The corresponding linear term is
+\begin{equation}
+\mathcal{L}(X) = \langle C, X \rangle_F = \sum_{i,j} C_{ij} X_{ij}.
+\end{equation}
+
+\subsection{Final Implemented Optimization Problem}
+
+The current implemented Phase 1 objective is
+\begin{equation}
+\boxed{
+\begin{aligned}
+\min_{X \in \mathcal{B}_n} \quad & \mathcal{L}(X) + \mathcal{Q}(X) \\
+= \quad & \sum_{i,j} C_{ij} X_{ij} + \|AX - XB\|_F^2.
+\end{aligned}}
+\end{equation}
+
+When the degree weights are set to zero, the solver reduces to the adjacency-only baseline
+\begin{equation}
+\min_{X \in \mathcal{B}_n} \|AX - XB\|_F^2.
+\end{equation}
+
+That ablation is central to this report because it isolates the role of the extra cost term.
+
+\section{Why the Objective Is Built This Way}
+
+\subsection{Why Start from $\|AX - XB\|_F^2$}
+
+The adjacency commutator is the cleanest continuous analog of the discrete isomorphism condition.
+It asks the relaxed matrix $X$ to approximately intertwine the two adjacency operators.
+
+That is exactly the right starting point.
+If the report used any other baseline, the mathematical link to permutation-based isomorphism would be weaker.
+
+\subsection{Why Add Degree Information}
+
+The adjacency-only objective often leaves the relaxed landscape too flat.
+Many soft assignments can produce small commutator residuals before the solver has committed to a sharp correspondence.
+
+The degree-profile term addresses that weakness by injecting local compatibility before the quadratic term has fully resolved the global structure.
+In practice, it behaves like a low-cost prior over plausible node matches.
+
+The extra term is also cheap.
+It changes neither the dimension of the feasible region nor the asymptotic structure of the QP.
+
+That makes it an excellent Phase 1 addition:
+it adds signal without forcing a redesign of the solver.
+
+\section{From Relaxed Matrix to Isomorphism Index}
+
+Once the solver finds an optimum $X^*$, it reports the objective value $Z^*$ and the repository converts it into a bounded score
+\begin{equation}
+I = \exp(-\lambda Z^*),
+\end{equation}
+with current scaling parameter
+\begin{equation}
+\lambda = 0.1.
+\end{equation}
+
+This score is not a proof of isomorphism.
+It is a similarity indicator derived from the relaxed objective.
+
+When $Z^*$ is tiny, $I$ is near $1$.
+When $Z^*$ is large, $I$ drops away from $1$.
+
+The point of the score is comparative interpretation.
+It lets us see whether one objective spreads apart isomorphic and non-isomorphic cases more effectively than another.
+
+\section{Rounding and Exact Verification}
+
+\subsection{Current Active Path: Hyperplane Rounding}
+
+The current active pipeline does not stop at $X^*$.
+It rounds the doubly stochastic matrix to a permutation candidate using the hyperplane-rounding routine in \texttt{hyperplane\_rounding.py}.
+
+The implemented procedure first computes an SVD-based embedding of the rows and columns of $X^*$.
+It then samples random hyperplanes in the embedding space, converts the projections into sign signatures, and solves a linear assignment on the resulting Hamming-distance matrix.
+
+The current \texttt{compute\_isomorphism\_index} path runs this routine with 200 trials and a fixed seed, then verifies the resulting permutation candidate exactly.
+
+\subsection{Offline Comparison Baseline: Hungarian Rounding}
+
+Although Hungarian rounding is no longer wired into the active solver path, it remains the natural comparison baseline.
+Given $X^*$, Hungarian rounding computes the nearest permutation under linear assignment by minimizing the cost matrix $1 - X^*$.
+
+That baseline is useful because it is deterministic, extremely fast, and easy to interpret.
+It remains the cleanest reference point for evaluating whether hyperplane rounding is actually extracting extra geometric information from the relaxed matrix.
+
+\subsection{Exact Integer Verification}
+
+After rounding, the code verifies the candidate permutation exactly by checking whether
+\begin{equation}
+AP^* - P^*B = 0
+\end{equation}
+in integer arithmetic.
+
+This matters.
+The relaxed objective and the index $I$ are heuristic similarity measures.
+The residual check is the exact certificate.
+
+If the residual vanishes, the solver has produced a valid isomorphism witness.
+If it does not, the result is inconclusive rather than a proof of non-isomorphism.
+
+\subsection{Why Keep the Hungarian Comparison}
+
+The switch to hyperplane rounding does not remove the need for comparison.
+On the contrary, once hyperplane rounding becomes the active path, it becomes even more important to compare it against Hungarian rounding offline.
+
+The evaluation question is simple:
+does the geometry-aware rounding path certify more true isomorphisms, or recover better permutations on hard fractional cases, than the nearest-permutation baseline?
+
+Phase 1 can now answer that question empirically on the current benchmark family.
+
+\section{Experimental Setup for This Report}
+
+All results below were generated from the current repository on 2026-05-01.
+The runs used the code in \texttt{generators.py}, \texttt{isomorphism.py}, and \texttt{hyperplane\_rounding.py}.
+
+Two objective configurations were compared:
+\begin{enumerate}[label=\arabic*.]
+    \item \textbf{Adjacency only}: $\alpha = 0$, $\beta = 0$.
+    \item \textbf{Degree plus adjacency}: $\alpha = 1.0$, $\beta = 0.35$.
+\end{enumerate}
+
+For each $n \in \{5,6,7,8,9,10\}$,
+I generated six isomorphic pairs and six nominally non-isomorphic pairs.
+Every generated pair was then checked with NetworkX isomorphism testing so that the report could distinguish truly non-isomorphic samples from accidental collisions.
+
+This exact-label check is important.
+The current \texttt{make\_non\_isomorphic\_pair} function samples two dense random graphs independently.
+That procedure makes non-isomorphism overwhelmingly likely, but not guaranteed.
+
+\section{Ablation I: Adjacency-Only vs Degree-Augmented Objective}
+
+\subsection{Overall Aggregate Results}
+
+Table~\ref{tab:overall-objective} compares the two objectives over the rerun dataset.
+The most important line is the verified non-isomorphic subset:
+that excludes accidental isomorphic collisions from the nominal non-isomorphic bucket.
+
+\begin{table}[h]
+\centering
+\caption{Overall objective comparison on fresh reruns under the active hyperplane-rounding pipeline. Times are mean end-to-end solve times.}
+\label{tab:overall-objective}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.0cm} >{\raggedright\arraybackslash}p{3.0cm} r r r r}
+\toprule
+Objective & Dataset & Mean time (s) & Mean $Z^*$ & Mean $I$ & Active cert rate \\
+\midrule
+Adjacency only & Isomorphic & 0.00973 & $6.38 \times 10^{-9}$ & 0.99999999936 & 77.8\% \\
+Adjacency only & Verified non-isomorphic & 0.01197 & 0.51625 & 0.94989 & 0.0\% \\
+\addlinespace
+Degree + adjacency & Isomorphic & 0.00896 & $3.75 \times 10^{-9}$ & 0.99999999963 & 77.8\% \\
+Degree + adjacency & Verified non-isomorphic & 0.01109 & 11.05194 & 0.37353 & 0.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The contrast is sharp.
+On isomorphic pairs, both objectives behave almost identically:
+solve times are essentially the same,
+the objective values collapse toward zero,
+and the index remains effectively $1$.
+
+On verified non-isomorphic pairs, the difference is dramatic.
+Adjacency-only matching leaves the mean index at approximately $0.95$,
+which is far too close to the isomorphic regime to be a useful similarity score.
+
+Once the degree-profile term is restored, the mean index on verified non-isomorphic pairs drops to approximately $0.37$.
+That is the strongest empirical justification for the extra cost term in the current code.
+
+\subsection{Per-$n$ Separation Trend}
+
+Table~\ref{tab:per-n-noniso} shows the same pattern broken down by graph size for verified non-isomorphic pairs.
+The degree-augmented objective produces much stronger separation at every tested $n$.
+
+\begin{table}[h]
+\centering
+\caption{Verified non-isomorphic pairs only: per-$n$ mean scores and solve times.}
+\label{tab:per-n-noniso}
+\begin{tabular}{r r r r r r}
+\toprule
+$n$ & \multicolumn{2}{c}{Mean $I$} & \multicolumn{2}{c}{Mean $Z^*$} & Mean time (s) \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-6}
+ & Adj. only & Degree + adj. & Adj. only & Degree + adj. & Both objectives \\
+\midrule
+5  & 0.9642 & 0.6392 & 0.3646 & 4.4750 & $\approx 0.0043$ \\
+6  & 0.9704 & 0.5257 & 0.3004 & 6.5277 & $\approx 0.0056$ \\
+7  & 0.9641 & 0.4100 & 0.3655 & 9.0144 & $\approx 0.0078$ \\
+8  & 0.9446 & 0.3135 & 0.5706 & 12.1260 & $\approx 0.0112$ \\
+9  & 0.9145 & 0.1888 & 0.8973 & 17.1273 & $\approx 0.0159$ \\
+10 & 0.9570 & 0.3140 & 0.4409 & 11.7582 & $\approx 0.0237$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This table answers the central Phase 1 question.
+Why is the objective not just $\|AX - XB\|_F^2$?
+
+Because that term alone does not spread apart the random verified non-isomorphic pairs enough.
+The degree-profile term supplies low-order structural bias that the commutator alone is not extracting reliably in the relaxed space.
+
+\subsection{Interpretation}
+
+These results do not mean that degree information solves graph isomorphism.
+They mean something narrower and more important for the current phase:
+the extra linear term improves the geometry of the practical optimization landscape without increasing solve time in any meaningful way.
+
+That is exactly the kind of modification Phase 1 should prioritize.
+
+\section{Ablation II: Why Rounding Matters at All}
+
+The aggregate tables above already show that even for exact isomorphic pairs,
+the certification rate is only 77.8\% on the tested reruns.
+That is not because the graphs are failing to be isomorphic.
+It is because the relaxed optimum $X^*$ is not always close enough to a certifying permutation for the current rounding path to recover it.
+
+This is easiest to see on symmetric graph families.
+
+\subsection{Cycle Graph Case Study}
+
+I tested an 8-cycle against an isomorphic relabeling.
+For both objective variants, the solver returned a completely uniform matrix:
+\begin{equation}
+X^*_{ij} = \frac{1}{8} \qquad \text{for all } i,j.
+\end{equation}
+
+The first row of $X^*$ was
+\begin{equation}
+[0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125].
+\end{equation}
+
+The measured objective value was numerically zero:
+\begin{equation}
+Z^* = 1.79 \times 10^{-30},
+\end{equation}
+so the index was exactly
+\begin{equation}
+I = 1.0.
+\end{equation}
+
+Yet neither rounding procedure produced a certificate.
+The active hyperplane path failed, with best residual 32 after 200 trials,
+and the offline Hungarian comparison also returned \texttt{false}.
+
+This example is useful because it isolates the issue cleanly.
+The optimization objective is satisfied,
+but the solution lies at a highly symmetric interior point of the Birkhoff polytope rather than at a permutation vertex.
+
+That is why rounding is not a cosmetic post-processing step.
+It is a central part of the overall method.
+
+\section{Rounding Comparison: Active Hyperplane vs Offline Hungarian}
+
+\subsection{Aggregate Comparison}
+
+Table~\ref{tab:rounding} compares the two rounding schemes on the rerun matrices.
+
+\begin{table}[h]
+\centering
+\caption{Rounding comparison on the rerun dataset. Hyperplane is the active in-solver path; Hungarian is computed offline on the saved $X^*$ matrices for comparison.}
+\label{tab:rounding}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.0cm} r r r r r}
+\toprule
+Objective source & Cases & Hyperplane certs & Hungarian certs & Hyperplane-only wins & Hungarian round time \\
+\midrule
+Adjacency-only matrices & 72 & 30 & 30 & 0 & $3.14 \times 10^{-6}$ s \\
+\addlinespace
+Degree + adjacency matrices & 72 & 30 & 30 & 0 & $2.78 \times 10^{-6}$ s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On the tested dataset, hyperplane rounding matched Hungarian exactly in certification count.
+It produced no hyperplane-only wins and no Hungarian-only wins.
+
+The timing contrast is still clear.
+The offline Hungarian pass takes only a few microseconds per matrix at these sizes.
+The active hyperplane cost is already included inside the end-to-end solve times reported earlier, which now average about 0.0100--0.0108 seconds per case across the two objective variants on this rerun.
+
+\subsection{Interpretation}
+
+This does \emph{not} imply that hyperplane rounding is useless.
+It implies something more specific:
+the current implementation and the currently tested matrices have not yet demonstrated a practical advantage over the existing baseline.
+
+That is still useful progress.
+It means the report can describe the new active hyperplane path honestly, together with clear evaluation criteria:
+\begin{enumerate}[label=\arabic*.]
+    \item more certification wins than Hungarian on hard fractional cases,
+    \item meaningful advantage on structured benchmark families,
+    \item acceptable runtime overhead relative to the gain.
+\end{enumerate}
+
+At the moment, those wins have not yet appeared in the tested runs.
+
+\section{Threats to Validity}
+
+\subsection{Random ``Non-Isomorphic'' Pairs Are Only Probabilistic}
+
+The generator used for non-isomorphic pairs samples two dense random graphs independently.
+That procedure does not enforce non-isomorphism.
+
+In a fresh six-pair rerun at $n=5$,
+two of the six nominally non-isomorphic samples were in fact isomorphic under exact NetworkX checking.
+For $n=6$ through $n=10$, the rerun happened to contain no such collisions.
+
+This is not a cosmetic detail.
+If accidental collisions are not filtered out, they distort the very score separation that the report is trying to measure.
+
+That is why the verified non-isomorphic subset is the right comparison set in this draft.
+
+\subsection{Current Benchmark Family Is Narrow}
+
+The current code mainly exercises dense Erd\H{o}s--R\'enyi style random graphs.
+That is convenient for early benchmarking but not sufficient as a stress suite.
+
+Highly symmetric families, regular families, and specially constructed hard pairs can behave very differently from random dense graphs.
+The cycle-graph example above already shows that the relaxed solver can settle on a perfectly diffuse matrix in the presence of symmetry.
+
+\subsection{The Report Must Follow the Code, Not Earlier Notes}
+
+Earlier repository documents discuss additional terms such as higher-order walk penalties or spectral alignment.
+Those are not part of the current active solver.
+
+This report therefore treats the code as authoritative.
+That choice is deliberate.
+A progress report is strongest when every mathematical claim can be traced to running code.
+
+\section{What Phase 1 Establishes}
+
+Phase 1 establishes five concrete points.
+
+\begin{enumerate}[label=\arabic*.]
+    \item The graph isomorphism problem can be attacked as a continuous optimization over doubly stochastic matrices.
+    \item The adjacency commutator is the correct structural baseline because it is the direct relaxation of $AP = PB$.
+    \item In practice, that baseline alone is too weak as a similarity score on verified non-isomorphic random pairs.
+    \item The implemented degree-profile term materially improves separation while leaving end-to-end solve times almost unchanged.
+    \item Rounding remains the main bottleneck between a good soft matrix and a certifying permutation, and the current active hyperplane path has not yet beaten the offline Hungarian baseline on the tested runs.
+\end{enumerate}
+
+\section{Clean Insertion Points for the Next Additions}
+
+This report is intentionally structured so that future phases can be inserted without rewriting the core story.
+
+The natural extensions are:
+\begin{enumerate}[label=\arabic*.]
+    \item stronger objective terms, added as new ablation chapters after Section 8,
+    \item better benchmark families, inserted into the experimental setup and validity sections,
+    \item improved rounding methods, added to the rounding comparison chapter,
+    \item exact or semi-exact constraints that sharpen the relaxed solution before rounding.
+\end{enumerate}
+
+That modularity matters.
+The current report should remain valid even after the next terms are added.
+Only the comparison chapters need to expand.
+
+\section{Conclusion}
+
+The present codebase already supports a coherent Phase 1 report.
+The method is not merely a relaxation plus a vague score.
+It is a complete pipeline:
+formulate the correspondence problem,
+relax it to the Birkhoff polytope,
+solve a structured objective,
+round the soft solution,
+and verify the candidate permutation exactly.
+
+The key empirical result of this phase is simple and defensible.
+Adding the degree-profile cost term sharply improves the separation between isomorphic and verified non-isomorphic random graph pairs while keeping runtime effectively unchanged.
+
+The key open issue is equally clear.
+A good relaxed matrix is not automatically a good permutation witness.
+That is why rounding remains a first-class research question rather than a final afterthought.
+
+In that sense, switching the main pipeline to hyperplane rounding is a meaningful Phase 1 update.
+It promotes rounding from a side experiment into part of the source-of-truth method.
+The current evidence simply says that this promotion has not yet changed certification outcomes relative to the offline Hungarian baseline on the tested data.
+
+That is an honest and useful Phase 1 result.
+\end{document}

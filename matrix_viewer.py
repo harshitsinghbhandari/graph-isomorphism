@@ -2,9 +2,11 @@
 """
 Matrix Viewer Generator
 
-Scans data/matrices/{n}/*.json and generates a self-contained HTML viewer.
+Scans a matrices directory of the form {base_dir}/{n}/*.json and generates
+a self-contained HTML viewer.
 """
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -361,6 +363,7 @@ body {
 
 <script>
 const DATA = __DATA_PLACEHOLDER__;
+const SHOW_GRAPHS = __SHOW_GRAPHS_PLACEHOLDER__;
 
 // Build file tree
 const fileTree = document.getElementById('fileTree');
@@ -560,17 +563,27 @@ function renderMatrix(n, file) {
   `;
   html += '</div>';
 
-  container.innerHTML = `
-    <div class="comparison-layout">
-      ${renderGraphPanel('Graph A', file.graph_a, 'Graph A not stored in this result. Rerun the benchmark to embed graph snapshots.')}
+  if (SHOW_GRAPHS) {
+    container.innerHTML = `
+      <div class="comparison-layout">
+        ${renderGraphPanel('Graph A', file.graph_a, 'Graph A not stored in this result. Rerun the benchmark to embed graph snapshots.')}
+        <div class="panel">
+          <div class="panel-title">Permutation Matrix P</div>
+          <div class="panel-subtitle">${size} × ${size}</div>
+          ${html}
+        </div>
+        ${renderGraphPanel('Graph B', file.graph_b, 'Graph B not stored in this result. Rerun the benchmark to embed graph snapshots.')}
+      </div>
+    `;
+  } else {
+    container.innerHTML = `
       <div class="panel">
         <div class="panel-title">Permutation Matrix P</div>
         <div class="panel-subtitle">${size} × ${size}</div>
         ${html}
       </div>
-      ${renderGraphPanel('Graph B', file.graph_b, 'Graph B not stored in this result. Rerun the benchmark to embed graph snapshots.')}
-    </div>
-  `;
+    `;
+  }
 }
 </script>
 
@@ -612,10 +625,11 @@ def scan_matrices(base_dir="data/matrices"):
     return data
 
 
-def generate_viewer(data, output_path="matrix_viewer.html"):
+def generate_viewer(data, output_path="matrix_viewer.html", show_graphs=True):
     """Generate the HTML viewer with embedded data."""
     json_data = json.dumps(data)
     html = HTML_TEMPLATE.replace("__DATA_PLACEHOLDER__", json_data)
+    html = html.replace("__SHOW_GRAPHS_PLACEHOLDER__", "true" if show_graphs else "false")
 
     Path(output_path).write_text(html, encoding="utf-8")
 
@@ -624,16 +638,42 @@ def generate_viewer(data, output_path="matrix_viewer.html"):
     print(f"  {len(data)} sizes, {total_files} matrices total")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate a self-contained matrix viewer HTML.")
+    parser.add_argument(
+        "--base-dir",
+        default="data/matrices",
+        help="Directory containing per-n subfolders of matrix JSON files "
+             "(default: data/matrices)",
+    )
+    parser.add_argument(
+        "--output",
+        default="matrix_viewer.html",
+        help="Output HTML path (default: matrix_viewer.html)",
+    )
+    parser.add_argument(
+        "--hide-graphs",
+        action="store_true",
+        help="Hide Graph A and Graph B panels and show only the permutation matrix",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_args()
+
     print("=" * 50)
     print("  Matrix Viewer Generator")
     print("=" * 50)
+    print(f"  Base dir : {args.base_dir}")
+    print(f"  Output   : {args.output}")
+    print(f"  Graphs   : {'hidden' if args.hide_graphs else 'shown'}")
 
-    data = scan_matrices()
+    data = scan_matrices(args.base_dir)
 
     if not data:
-        print("  No matrices found in data/matrices/")
+        print(f"  No matrices found in {args.base_dir}/")
     else:
-        generate_viewer(data)
+        generate_viewer(data, args.output, show_graphs=not args.hide_graphs)
 
     print("=" * 50)
