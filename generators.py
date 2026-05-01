@@ -1,7 +1,6 @@
 import networkx as nx
 
-DENSE_RATIO_MIN = 0.80
-DENSE_RATIO_MAX = 0.85
+DEFAULT_DENSITY_RANGE = (0.80, 0.85)
 
 
 def _non_identity_permutation(n, rng):
@@ -15,22 +14,27 @@ def _sorted_adjacency_matrix(G):
     return nx.to_numpy_array(G, nodelist=sorted(G.nodes()))
 
 
-def _dense_edge_count(n, rng):
+def _edge_count(n, rng, density_range):
+    d_min, d_max = density_range
+    if not (0.0 <= d_min <= d_max <= 1.0):
+        raise ValueError(f"density_range must satisfy 0 <= min <= max <= 1, got {density_range}")
     max_edges = n * (n - 1) // 2
-    min_edges = int(round(DENSE_RATIO_MIN * max_edges))
-    max_dense_edges = int(round(DENSE_RATIO_MAX * max_edges))
+    min_edges = int(round(d_min * max_edges))
+    max_dense_edges = int(round(d_max * max_edges))
+    if max_dense_edges < min_edges:
+        max_dense_edges = min_edges
     return int(rng.integers(min_edges, max_dense_edges + 1))
 
 
-def make_isomorphic_pair(n, rng):
+def make_isomorphic_pair(n, rng, density_range=DEFAULT_DENSITY_RANGE):
     """Create an isomorphic pair whose solver-basis adjacency matrices are not identical."""
     if n <= 2:
-        m = _dense_edge_count(n, rng)
+        m = _edge_count(n, rng, density_range)
         G1 = nx.gnm_random_graph(n, m, seed=int(rng.integers(1_000_000)))
         return G1, G1.copy()
 
     for _ in range(128):
-        m = _dense_edge_count(n, rng)
+        m = _edge_count(n, rng, density_range)
         G1 = nx.gnm_random_graph(n, m, seed=int(rng.integers(1_000_000)))
         perm = _non_identity_permutation(n, rng)
 
@@ -44,10 +48,10 @@ def make_isomorphic_pair(n, rng):
     raise RuntimeError(f"Could not generate a non-identical isomorphic pair for n={n}")
 
 
-def make_non_isomorphic_pair(n, rng):
+def make_non_isomorphic_pair(n, rng, density_range=DEFAULT_DENSITY_RANGE):
     """Create two random graphs that are almost certainly non-isomorphic."""
-    m1 = _dense_edge_count(n, rng)
-    m2 = _dense_edge_count(n, rng)
+    m1 = _edge_count(n, rng, density_range)
+    m2 = _edge_count(n, rng, density_range)
     G1 = nx.gnm_random_graph(n, m1, seed=int(rng.integers(1_000_000)))
     G2 = nx.gnm_random_graph(n, m2, seed=int(rng.integers(1_000_000)))
     return G1, G2
