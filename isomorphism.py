@@ -2,10 +2,11 @@ import gurobipy as gp
 from gurobipy import GRB
 import numpy as np
 import networkx as nx
-from scipy.optimize import linear_sum_assignment
 import json
 import uuid
 import os
+
+from hyperplane_rounding import hyperplane_round
 
 DEFAULT_SOLVER_WEIGHTS = {
     "degree_profile": {
@@ -36,24 +37,6 @@ def _degree_cost_matrix(A, B, degree_weight, neighbor_degree_weight):
         degree_weight * np.abs(degA[:, None] - degB[None, :]) +
         neighbor_degree_weight * np.abs(neighbor_degA[:, None] - neighbor_degB[None, :])
     )
-
-
-def _hungarian_round(X_star):
-    """Round a doubly-stochastic matrix to the nearest permutation matrix."""
-    row_ind, col_ind = linear_sum_assignment(1.0 - X_star)
-    n = X_star.shape[0]
-    P = np.zeros((n, n), dtype=int)
-    P[row_ind, col_ind] = 1
-    return P
-
-
-def _integer_verify(A, B, P):
-    """Check AP == PB exactly in integer arithmetic."""
-    A_int = A.astype(np.int64)
-    B_int = B.astype(np.int64)
-    P_int = P.astype(np.int64)
-    residual = A_int @ P_int - P_int @ B_int
-    return bool(np.all(residual == 0))
 
 
 def _adjacency_matrix_for_solver(G):
@@ -135,9 +118,9 @@ def compute_isomorphism_index(
     Z_star = model.objVal
     I = np.exp(-lambda_val * Z_star)
 
-    # Hungarian rounding + integer verification (Fix 1 from failure.tex)
-    P_star = _hungarian_round(X_star)
-    is_isomorphic = _integer_verify(A, B, P_star)
+    # Goemans-Williamson hyperplane rounding + integer verification.
+    P_star, _ = hyperplane_round(X_star, A, B, num_trials=200, seed=0)
+    is_isomorphic = bool(np.array_equal(A @ P_star, P_star @ B))
 
     # --- Save to structured path ---
     entry_id = str(uuid.uuid4())
