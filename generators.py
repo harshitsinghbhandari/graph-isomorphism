@@ -1,9 +1,14 @@
+"""Graph-pair generators used by the solver demos and benchmarks."""
+
+from __future__ import annotations
+
 import networkx as nx
 
 DEFAULT_DENSITY_RANGE = (0.80, 0.85)
 
 
 def _non_identity_permutation(n, rng):
+    """Return a random permutation that changes at least one label when possible."""
     perm = rng.permutation(n)
     if n > 1 and all(int(perm[i]) == i for i in range(n)):
         perm[[0, 1]] = perm[[1, 0]]
@@ -11,10 +16,12 @@ def _non_identity_permutation(n, rng):
 
 
 def _sorted_adjacency_matrix(G):
+    """Adjacency matrix in the same sorted-node basis used by the solver."""
     return nx.to_numpy_array(G, nodelist=sorted(G.nodes()))
 
 
 def _edge_count(n, rng, density_range):
+    """Sample an edge count from an inclusive density interval."""
     d_min, d_max = density_range
     if not (0.0 <= d_min <= d_max <= 1.0):
         raise ValueError(f"density_range must satisfy 0 <= min <= max <= 1, got {density_range}")
@@ -27,7 +34,13 @@ def _edge_count(n, rng, density_range):
 
 
 def make_isomorphic_pair(n, rng, density_range=DEFAULT_DENSITY_RANGE):
-    """Create an isomorphic pair whose solver-basis adjacency matrices are not identical."""
+    """Create an isomorphic graph pair.
+
+    For ``n > 2`` the second graph is relabeled onto a disjoint node set, then
+    both graphs are later converted through sorted-node adjacency matrices.
+    This avoids the trivial case where the two solver-basis matrices are
+    already identical.
+    """
     if n <= 2:
         m = _edge_count(n, rng, density_range)
         G1 = nx.gnm_random_graph(n, m, seed=int(rng.integers(1_000_000)))
@@ -49,7 +62,11 @@ def make_isomorphic_pair(n, rng, density_range=DEFAULT_DENSITY_RANGE):
 
 
 def make_non_isomorphic_pair(n, rng, density_range=DEFAULT_DENSITY_RANGE):
-    """Create two random graphs that are almost certainly non-isomorphic."""
+    """Create two independently sampled graphs.
+
+    The result is probabilistically, not constructively, non-isomorphic.  Any
+    benchmark that needs ground truth should verify the pair with VF2/nauty.
+    """
     m1 = _edge_count(n, rng, density_range)
     m2 = _edge_count(n, rng, density_range)
     G1 = nx.gnm_random_graph(n, m1, seed=int(rng.integers(1_000_000)))

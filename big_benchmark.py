@@ -509,7 +509,7 @@ def plot_time_vs_n(summary: dict[str, Any]) -> None:
     ax.set_xlabel("n (number of nodes)")
     ax.set_ylabel("mean wall time per pair (s)")
     ax.set_yscale("log")
-    ax.set_title("Time per pair vs n  (mean over 12 pairs/n; log y)")
+    ax.set_title("Time per pair vs n  (mean over available pairs; log y)")
     ax.grid(True, which="both", linestyle=":", alpha=0.5)
     if ax.lines:
         ax.legend()
@@ -534,7 +534,7 @@ def plot_certificate_rate_iso(summary: dict[str, Any]) -> None:
     ax.set_xlabel("n")
     ax.set_ylabel("certificate rate on iso pairs")
     ax.set_ylim(-0.02, 1.05)
-    ax.set_title("Iso-pair certificate rate vs n  (5 pairs/n)")
+    ax.set_title("Iso-pair certificate rate vs n")
     ax.grid(True, linestyle=":", alpha=0.5)
     if ax.lines:
         ax.legend()
@@ -561,7 +561,7 @@ def plot_iso_rate_random(summary: dict[str, Any]) -> None:
     ax.set_xlabel("n")
     ax.set_ylabel("fraction called isomorphic on random pairs")
     ax.set_ylim(-0.02, 1.05)
-    ax.set_title("Iso-rate on random pairs vs n  (7 pairs/n; gap to VF2 ~ FP)")
+    ax.set_title("Iso-rate on random pairs vs n  (gap to VF2 ~ FP)")
     ax.grid(True, linestyle=":", alpha=0.5)
     if ax.lines:
         ax.legend()

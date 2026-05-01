@@ -5,9 +5,17 @@ __pycache__/
 
 data/
 benchmark_data/
+compare_*/
+single_case_*/
+*_matrix_viewer.html
 .DS_Store
 
 isomorphism_report.html
 isomorphism_report.json
 comparison_report.html
 matrix_viewer.html
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz

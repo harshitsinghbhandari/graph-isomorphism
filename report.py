@@ -1,6 +1,9 @@
+"""Generate a compact self-contained HTML report for small solver runs."""
+
 import json
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -123,7 +126,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </div>
 
 <script>
-// FIX: Parse JSON data properly and handle errors
+// Parse embedded JSON data defensively so a malformed report fails visibly.
 let raw;
 try {
   raw = {JSON_DATA};
@@ -150,7 +153,7 @@ const nonZ = raw.map(r => r.non_iso_z.mean !== null ? +r.non_iso_z.mean.toFixed(
 const BLUE = '#378add', CORAL = '#d85a30';
 const BLUE_A = 'rgba(55,138,221,0.15)', CORAL_A = 'rgba(216,90,48,0.15)';
 
-// FIX: Remove errorBars (not supported in Chart.js 4.4.1)
+// Chart.js core does not support error bars without an extra plugin.
 function makeChart(id, label1, label2, data1, data2, yLabel) {
   const ctx = document.getElementById(id);
   if (!ctx) {
@@ -182,7 +185,6 @@ function makeChart(id, label1, label2, data1, data2, yLabel) {
   });
 }
 
-// FIX: Call with correct parameters (removed errorBars)
 makeChart('timeChart', 'Isomorphic', 'Non-isomorphic',
           isoMean, nonMean, 'Time (s)');
 makeChart('scoreChart', 'Isomorphic', 'Non-isomorphic',
@@ -190,7 +192,7 @@ makeChart('scoreChart', 'Isomorphic', 'Non-isomorphic',
 makeChart('zChart', 'Isomorphic', 'Non-isomorphic',
           isoZ, nonZ, 'Objective Z*');
 
-// FIX: Proper error handling for table rendering
+// Render the full table after validating that the target element exists.
 const tbody = document.getElementById('tableBody');
 if (!tbody) {
   console.error("Table body element not found");
@@ -224,19 +226,24 @@ if (!tbody) {
 """
 
 def generate_report(results, n_max, pairs, lambda_val, out_path):
+    """Write a self-contained HTML report from aggregated benchmark rows."""
     all_iso_times = [r["iso_time"]["mean"] for r in results if r["iso_time"]["mean"]]
     all_non_times = [r["non_iso_time"]["mean"] for r in results if r["non_iso_time"]["mean"]]
     all_times = all_iso_times + all_non_times
 
     slowest_val = max(all_times) if all_times else 0
-    slowest_n = max(results, key=lambda r: max(
-        r["iso_time"]["mean"] or 0, r["non_iso_time"]["mean"] or 0))["n"]
+    slowest_n = max(
+        results,
+        key=lambda r: max(r["iso_time"]["mean"] or 0, r["non_iso_time"]["mean"] or 0),
+    )["n"] if results else "n/a"
 
-    avg_iso_score = np.mean([r["iso_score"]["mean"] for r in results if r["iso_score"]["mean"]])
-    avg_non_score = np.mean([r["non_iso_score"]["mean"] for r in results if r["non_iso_score"]["mean"]])
+    iso_scores = [r["iso_score"]["mean"] for r in results if r["iso_score"]["mean"]]
+    non_scores = [r["non_iso_score"]["mean"] for r in results if r["non_iso_score"]["mean"]]
+    avg_iso_score = float(np.mean(iso_scores)) if iso_scores else 0.0
+    avg_non_score = float(np.mean(non_scores)) if non_scores else 0.0
 
     total_solves = sum(
-        (5 if r["iso_time"]["mean"] else 0) + (5 if r["non_iso_time"]["mean"] else 0)
+        (pairs if r["iso_time"]["mean"] else 0) + (pairs if r["non_iso_time"]["mean"] else 0)
         for r in results
     )
 
@@ -249,7 +256,7 @@ def generate_report(results, n_max, pairs, lambda_val, out_path):
     html = html.replace("{AVG_ISO_SCORE}", f"{avg_iso_score:.4f}")
     html = html.replace("{AVG_NON_SCORE}", f"{avg_non_score:.4f}")
 
-    # FIX: Properly escape and insert JSON data
+    # Compact JSON is embedded directly into the self-contained HTML report.
     json_str = json.dumps(results)
     html = html.replace("{JSON_DATA}", json_str)
 

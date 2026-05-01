@@ -1,77 +1,109 @@
-# Graph Isomorphism Benchmark
+# Graph Isomorphism via Relaxation and Rounding
 
-This repository contains a benchmarking suite for computing an "Isomorphism Index" between pairs of graphs. It generates varying sizes of both isomorphic and almost certainly non-isomorphic random graph pairs (using the Erdos-Renyi model) and formulates the graph isomorphism problem as a Quadratic Program (QP) that is then solved using the [Gurobi Optimizer](https://www.gurobi.com/).
+This repository contains the code and report material for a Phase 1 graph
+isomorphism experiment.
 
-The results of the benchmark are aggregated to produce a comprehensive HTML report with visualizations (using Chart.js) and a raw JSON file containing the timing and accuracy statistics.
+The implemented method is:
 
-## Project Structure
+1. Formulate graph isomorphism as the permutation condition `A P = P B`.
+2. Relax the permutation matrix `P` to a doubly stochastic matrix `X`.
+3. Solve a convex quadratic program over the Birkhoff polytope.
+4. Round `X*` to a permutation candidate using hyperplane rounding.
+5. Certify only by the exact integer check `A @ P == P @ B`.
 
-The project has been modularized into easy-to-maintain files:
+The score `I = exp(-lambda * Z*)` is a similarity index. It is not used as a
+proof. The only proof of isomorphism is a rounded permutation whose residual is
+exactly zero.
 
-- `main.py`: The entry point script that orchestrates the benchmarking process.
-- `config.py`: Contains configurations such as minimum/maximum graph sizes, pairs to generate, and report paths.
-- `isomorphism.py`: Contains the mathematical formulation of the isomorphism index and the Gurobi QP solver logic.
-- `generators.py`: Contains functions to generate isomorphic and non-isomorphic graph pairs using `networkx`.
-- `benchmark.py`: Runs the benchmark across the ranges defined in config and measures execution times and indices.
-- `report.py`: Handles generating the rich HTML report and substituting benchmark data into it.
-- `matrix_viewer.py`: Generates an interactive HTML viewer for visualizing the computed permutation matrices.
+## Core Files
 
-## Prerequisites
+- `isomorphism.py`: current source-of-truth solver.
+- `hyperplane_rounding.py`: SVD embedding plus random-hyperplane rounding.
+- `generators.py`: graph-pair generators used by experiments.
+- `main.py`: clean entry point for tests, single-case runs, small comparisons,
+  and matrix-viewer generation.
+- `big_benchmark.py`: benchmark against VF2, nauty, and bliss.
+- `matrix_viewer.py`: generates an HTML viewer from saved solver matrices.
+- `report.tex`: final dense report draft for presentation.
+- `theory.tex`: compact mathematical formulation.
+- `failure.tex`: failure modes and limitations appendix.
 
-- Python 3.8+
-- [Gurobi Optimizer](https://www.gurobi.com/downloads/gurobi-software/) and a valid license (academic or commercial)
+Generated outputs such as `benchmark_data/`, `data/`, `compare_*`, HTML reports,
+and matrix JSON files are intentionally ignored by git.
 
-## Installation
+## Setup
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/harshitsinghbhandari/graph-isomorphism.git
-   cd graph-isomorphism
-   ```
+Python 3.11+ is recommended. Gurobi must be installed with a valid license.
 
-2. Create a virtual environment (optional but recommended):
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
-   ```
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-3. Install the required packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
-   *(Ensure you have setup your Gurobi license prior to running the code. Refer to the [Gurobi documentation](https://support.gurobi.com/hc/en-us/articles/360040541131-How-do-I-set-up-a-Gurobi-license-) for more information).*
+On the server used for these experiments, `gurobipy==12.0.3` is required because
+the available license rejects Gurobi 13.
 
-## Usage
+## Quick Runs
 
-You can adjust benchmarking parameters in `config.py`. By default, it benchmarks graph sizes from `N_MIN = 1` to `N_MAX = 25` with 5 isomorphic and 5 non-isomorphic pairs each.
-
-Run the benchmark with:
+Open the interactive CLI:
 
 ```bash
 python main.py
 ```
 
-### Outputs
-
-Upon completion, the script generates two files:
-- `isomorphism_report.html`: A rich, interactive report displaying graphs of solve times, isomorphism indices, and objective values vs. graph node sizes.
-- `comparison_report.html`: A detailed per-comparison diagnostics report showing graph `A`, graph `B`, `X*`, and ambiguity flags.
-- `isomorphism_report.json`: The raw aggregated statistical data from the run.
-- `data/matrices/{n}/*.json`: Individual matrix results for each graph pair, organized by node count.
-
-Open the HTML report in your preferred web browser to view the benchmark results.
-
-### Viewing Matrices
-
-To visualize the computed permutation matrices, generate the matrix viewer:
+The same menu is available explicitly:
 
 ```bash
-python matrix_viewer.py
+python main.py interactive
 ```
 
-This creates `matrix_viewer.html`, a self-contained interactive viewer that lets you:
-- Browse matrices organized by graph size (n)
-- View graph `A`, graph `B`, and the final permutation matrix `X*` side by side
-- See metadata including pair type, comparison result, isomorphism index `I`, and objective value `Z*`
+Run tests:
 
-Open `matrix_viewer.html` in your browser to explore the results.
+```bash
+python main.py test
+```
+
+Run a single isomorphic test case and generate a matrix viewer:
+
+```bash
+python main.py single --n 101
+```
+
+Run a small comparison range:
+
+```bash
+python main.py compare --n-min 5 --n-max 30 --pairs 5
+```
+
+Run the larger benchmark:
+
+```bash
+python big_benchmark.py --sizes 50,60,70,80,90,100
+```
+
+Regenerate plots from existing run files:
+
+```bash
+python big_benchmark.py --plots-only
+```
+
+Generate a matrix viewer for an output directory:
+
+```bash
+python main.py viewer --base-dir benchmark_data/matrices --output benchmark_matrix_viewer.html --hide-graphs
+```
+
+Use `--hide-graphs` for large `n`; the graph drawings are not useful at 80+
+nodes, while the permutation matrix remains readable.
+
+## Current Limitations
+
+- Non-isomorphic random pairs are sampled independently, so exact ground truth
+  should be verified with VF2/nauty/bliss.
+- The relaxation can return diffuse matrices on symmetric or weakly identifiable
+  cases.
+- Hyperplane rounding is heuristic. A failed certificate means "not certified",
+  not a mathematical proof of non-isomorphism.
+- The current Gurobi model builds the adjacency residual with nested loops and
+  becomes expensive near 100+ nodes.

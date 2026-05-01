@@ -1,215 +1,134 @@
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
-\usepackage{amsmath, amssymb, amsthm}
-\usepackage{bm}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{enumitem}
 
-\title{\textbf{Continuous Relaxation for Graph Isomorphism Detection}}
+\title{\textbf{Theory Note: Current Relaxed GI Objective}}
 \author{}
-\date{}
+\date{Code-aligned version, 2026-05-01}
 
 \begin{document}
 \maketitle
 
-\section{Problem Formulation}
+\section{Graph Isomorphism}
 
-Given two simple, undirected graphs $G_1 = (V, E_1)$ and $G_2 = (V, E_2)$ on $n$ vertices, we seek to determine whether they are isomorphic. Two graphs are isomorphic if there exists a permutation $\pi: V \to V$ such that $(u, v) \in E_1 \iff (\pi(u), \pi(v)) \in E_2$.
-
-Let $\bm{A}, \bm{B} \in \{0,1\}^{n \times n}$ denote the adjacency matrices of $G_1$ and $G_2$ respectively. A permutation $\pi$ can be represented as a permutation matrix $\bm{P} \in \{0,1\}^{n \times n}$ where $P_{ij} = 1$ iff $\pi(i) = j$. The graphs are isomorphic iff there exists a permutation matrix $\bm{P}$ such that:
+Let $G_A$ and $G_B$ be simple undirected graphs with adjacency matrices
+$A,B\in\{0,1\}^{n\times n}$.
+They are isomorphic if and only if there exists a permutation matrix
+$P\in\Pi_n$ such that
 \begin{equation}
-    \bm{P}^\top \bm{A} \bm{P} = \bm{B}
+    AP = PB.
 \end{equation}
 
-Since searching over all $n!$ permutations is computationally intractable, we relax the problem to a continuous optimization over \emph{doubly stochastic matrices}.
+This is equivalent to $P^\top A P = B$.
+The formulation $AP=PB$ is the one used for verification in the codebase.
 
-\section{Doubly Stochastic Relaxation}
+\section{Birkhoff Relaxation}
 
-A matrix $\bm{X} \in \mathbb{R}^{n \times n}$ is \textbf{doubly stochastic} if:
+The discrete feasible set $\Pi_n$ is relaxed to the Birkhoff polytope
 \begin{equation}
-    X_{ij} \geq 0, \quad \sum_{j=1}^{n} X_{ij} = 1 \;\forall i, \quad \sum_{i=1}^{n} X_{ij} = 1 \;\forall j
+    \mathcal{B}_n =
+    \left\{
+    X \in \mathbb{R}^{n\times n} :
+    X_{ij}\ge 0,\ 
+    \sum_j X_{ij}=1,\ 
+    \sum_i X_{ij}=1
+    \right\}.
 \end{equation}
 
-The set of doubly stochastic matrices forms the \emph{Birkhoff polytope} $\mathcal{B}_n$, whose vertices are exactly the $n!$ permutation matrices (Birkhoff--von Neumann theorem). By optimizing over $\mathcal{B}_n$, we obtain a convex relaxation of the combinatorial problem.
+By the Birkhoff-von Neumann theorem, the vertices of $\mathcal{B}_n$ are
+exactly the permutation matrices.
+Thus the relaxation keeps all exact isomorphism witnesses while allowing the
+solver to search a continuous convex set.
 
-\section{Objective Function}
+\section{Current Objective}
 
-We formulate a quadratic program (QP) that penalizes structural mismatch between the graphs under a soft permutation $\bm{X} \in \mathcal{B}_n$. The implemented objective combines four signals:
-\begin{enumerate}
-    \item a degree-profile compatibility term,
-    \item a first-order adjacency commutator penalty,
-    \item a higher-order commutator cascade ($k = 2, \ldots, K$) capturing multi-hop structural differences,
-    \item a Grassmannian eigenspace alignment penalty based on Laplacian eigenspace projectors.
-\end{enumerate}
-
-\subsection{Degree Profile Compatibility (Linear Term)}
-
-Define the degree vectors
+The implemented solver optimizes
 \begin{equation}
-    d^A_i = \sum_k A_{ik},
-    \qquad
-    d^B_j = \sum_k B_{jk},
-\end{equation}
-and the one-hop degree-profile summaries
-\begin{equation}
-    s^A_i = \sum_k A_{ik} d^A_k,
-    \qquad
-    s^B_j = \sum_k B_{jk} d^B_k.
-\end{equation}
-
-The node-compatibility cost matrix is
-\begin{equation}
-    C_{ij} = \alpha \left| d^A_i - d^B_j \right|
+\boxed{
+    \min_{X\in\mathcal{B}_n}
+    w_C\langle C,X\rangle
     +
-    \beta \left| s^A_i - s^B_j \right|,
-\end{equation}
-where $\alpha, \beta \ge 0$ are tunable weights. This penalizes mapping node $i$ in $G_1$ to node $j$ in $G_2$ when their local degree statistics differ. The linear objective term is:
-\begin{equation}
-    \mathcal{L}(\bm{X}) = \sum_{i=1}^{n} \sum_{j=1}^{n} C_{ij} X_{ij} = \langle \bm{C}, \bm{X} \rangle_F
-\end{equation}
-
-\subsection{Adjacency Mismatch (Quadratic Term)}
-
-For a true permutation matrix $\bm{P}$, the transformed adjacency would be $\bm{P}^\top \bm{A} \bm{P}$. We penalize the discrepancy between $\bm{A}$ transformed by $\bm{X}$ and $\bm{B}$ transformed by $\bm{X}$:
-\begin{equation}
-    \mathcal{Q}(\bm{X}) = \sum_{p=1}^{n} \sum_{q=1}^{n} \left( \sum_{k=1}^{n} A_{pk} X_{kq} - \sum_{k=1}^{n} X_{pk} B_{kq} \right)^2
-\end{equation}
-
-This can be written in matrix form. Let $\bm{R} = \bm{A}\bm{X} - \bm{X}\bm{B}$, then:
-\begin{equation}
-    \mathcal{Q}(\bm{X}) = \|\bm{A}\bm{X} - \bm{X}\bm{B}\|_F^2 = \sum_{p,q} R_{pq}^2
-\end{equation}
-
-When $\bm{X} = \bm{P}$ is a valid isomorphism, we have $\bm{A}\bm{P} = \bm{P}\bm{B}$, hence $\mathcal{Q}(\bm{P}) = 0$.
-
-\subsection{Higher-Order Commutator Cascade}
-
-Direct adjacency alone does not fully capture local structure. Powers of the adjacency matrix encode $k$-hop walk counts: the entries of $\bm{A}^k$ count the number of walks of length $k$ between each pair of vertices. We add commutator penalties for powers $k = 2, \ldots, K$:
-\begin{equation}
-    \mathcal{T}(\bm{X}) = \sum_{k=2}^{K} \lambda_k \|\bm{A}^k \bm{X} - \bm{X}\bm{B}^k\|_F^2.
-\end{equation}
-
-If $\bm{X}=\bm{P}$ is an exact isomorphism then $\bm{A}^k \bm{P} = \bm{P}\bm{B}^k$ for all $k$, so $\mathcal{T}(\bm{P}) = 0$. The weights $\lambda_k$ decay with $k$ (default: $\lambda_2 = 0.20$, $\lambda_3 = 0.10$, $\lambda_4 = 0.05$, $\lambda_5 = 0.025$, $\lambda_6 = 0.012$) because higher powers amplify the spectral radius, requiring smaller weights to keep terms balanced.
-
-This cascade is critical for distinguishing strongly regular graphs with identical parameters $(n, k, \lambda, \mu)$, where the first- and second-order commutators alone provide no discrimination. For example, the Shrikhande graph and the $4 \times 4$ rook's graph---both $\text{srg}(16, 6, 2, 2)$---are distinguished at $k = 4$.
-
-\subsection{Grassmannian Eigenspace Alignment}
-
-Let the combinatorial Laplacians be
-\begin{equation}
-    \bm{L}_A = \operatorname{diag}(\bm{A}\bm{1}) - \bm{A},
-    \qquad
-    \bm{L}_B = \operatorname{diag}(\bm{B}\bm{1}) - \bm{B}.
-\end{equation}
-Compute the eigendecompositions $\bm{L}_A = \bm{U}_A \bm{\Lambda}_A \bm{U}_A^\top$ and $\bm{L}_B = \bm{U}_B \bm{\Lambda}_B \bm{U}_B^\top$. When a Laplacian has a repeated eigenvalue of multiplicity $m > 1$, the corresponding $m$-dimensional eigenspace has no canonical basis---any orthonormal basis is equally valid. Comparing raw eigenvector columns (even with sign normalization) therefore introduces spurious penalties and misleading gradient information.
-
-To resolve this, we compare \emph{eigenspaces} rather than individual eigenvectors. For each distinct eigenvalue cluster $\ell$ (grouped by proximity with tolerance $\epsilon$), let $\bm{U}_A^{(\ell)}$ denote the eigenvectors spanning that cluster and define the eigenspace projector:
-\begin{equation}
-    \bm{\Pi}_A^{(\ell)} = \bm{U}_A^{(\ell)} \left(\bm{U}_A^{(\ell)}\right)^\top,
-    \qquad
-    \bm{\Pi}_B^{(\ell)} = \bm{U}_B^{(\ell)} \left(\bm{U}_B^{(\ell)}\right)^\top.
-\end{equation}
-These projectors are invariant to rotations within degenerate eigenspaces, since $\bm{U}\bm{U}^\top$ does not depend on the choice of orthonormal basis for the column space.
-
-We penalize the commutator of the projectors with $\bm{X}$, weighted by eigenvalue magnitude $w_\ell = |\bar\lambda_\ell|$:
-\begin{equation}
-    \mathcal{S}(\bm{X}) = \sum_\ell w_\ell \left\| \bm{\Pi}_A^{(\ell)} \bm{X} - \bm{X} \bm{\Pi}_B^{(\ell)} \right\|_F^2.
-\end{equation}
-
-If $\bm{X} = \bm{P}$ is a valid isomorphism, then $\bm{\Pi}_A^{(\ell)} \bm{P} = \bm{P} \bm{\Pi}_B^{(\ell)}$ for every eigenspace $\ell$, so $\mathcal{S}(\bm{P}) = 0$. The trivial eigenspace corresponding to eigenvalue 0 (constant eigenvector) is excluded, as it provides no structural information.
-
-\section{Quadratic Program}
-
-The complete implemented optimization problem is:
-\begin{equation}
-\boxed{
-\begin{aligned}
-    Z^* = \min_{\bm{X}} \quad & \mathcal{L}(\bm{X})
-    + \mathcal{Q}(\bm{X})
-    + \mathcal{T}(\bm{X})
-    + \lambda_S \mathcal{S}(\bm{X}) \\
-    \text{s.t.} \quad & \sum_{j=1}^{n} X_{ij} = 1 \quad \forall\, i \in \{1, \ldots, n\} \\
-    & \sum_{i=1}^{n} X_{ij} = 1 \quad \forall\, j \in \{1, \ldots, n\} \\
-    & X_{ij} \geq 0 \quad \forall\, i, j
-\end{aligned}
+    w_Q\|AX-XB\|_F^2
 }
 \end{equation}
+with default weights $w_C=w_Q=1$.
 
-Here $\lambda_k$ (inside $\mathcal{T}$) and $\lambda_S$ control the contribution of the commutator cascade and spectral penalties respectively. In the current codebase the default values are
+\subsection{Adjacency Term}
+
+The adjacency term is
 \begin{equation}
-    \alpha = 1.0, \quad \beta = 0.35, \quad
-    \lambda_2 = 0.20, \quad \lambda_3 = 0.10, \quad \lambda_4 = 0.05, \quad \lambda_5 = 0.025, \quad \lambda_6 = 0.012, \quad
-    \lambda_S = 0.15.
+    Q(X)=\|AX-XB\|_F^2.
 \end{equation}
+If $X=P$ is a true isomorphism, then $Q(P)=0$.
+This term is the direct continuous analog of the exact condition $AP=PB$.
 
-The optimization remains a quadratic program over the Birkhoff polytope and is solved numerically with Gurobi.
+\subsection{Degree-Profile Term}
 
-\subsection{Remark on Entropy Regularization}
-
-An additional entropy term,
+Let
 \begin{equation}
-    -\varepsilon \sum_{i,j} X_{ij}\log X_{ij},
+    d^A_i=\sum_k A_{ik},\qquad d^B_j=\sum_k B_{jk}
 \end{equation}
-was proposed as a continuation-style regularizer to keep $\bm{X}$ diffuse early in the solve and help escape local minima. This term is \emph{not} currently implemented in the codebase, because it requires a different nonlinear or piecewise-linear treatment than the present quadratic formulation. A Sinkhorn warm-start strategy (solving a regularized assignment problem to initialize the QP) is a potential alternative that preserves the QP structure.
+be degrees, and
+\begin{equation}
+    s^A_i=\sum_k A_{ik}d^A_k,\qquad
+    s^B_j=\sum_k B_{jk}d^B_k
+\end{equation}
+be neighbor-degree summaries.
 
-\section{Isomorphism Index}
+The raw compatibility cost is
+\begin{equation}
+    C^{raw}_{ij}
+    =
+    \alpha |d^A_i-d^B_j|
+    +
+    \beta |s^A_i-s^B_j|,
+\end{equation}
+with default $\alpha=1.0$ and $\beta=0.35$.
+The code normalizes $C^{raw}$ by its maximum absolute entry when nonzero.
 
-The optimal objective value $Z^*$ measures the ``distance'' from isomorphism:
-\begin{itemize}
-    \item $Z^* = 0$: The graphs are isomorphic (a perfect permutation exists)
-    \item $Z^* > 0$: Structural mismatch; larger values indicate greater dissimilarity
+\section{Convexity}
+
+The current objective is convex.
+The feasible region is convex, $\langle C,X\rangle$ is linear, and
+$\|AX-XB\|_F^2$ is the squared norm of a linear function of $X$.
+
+Therefore the active model does not require Gurobi's non-convex QP mode.
+Future terms may change this, but the current source-of-truth solver is a
+convex QP.
+
+\section{Score and Certificate}
+
+After solving, the code reports
+\begin{equation}
+    I=\exp(-\lambda Z^*)
+\end{equation}
+with default $\lambda=0.1$.
+This is a similarity score only.
+
+The binary positive certificate is obtained separately.
+The relaxed matrix $X^*$ is rounded to a permutation candidate $P^*$ by the
+hyperplane-rounding routine, and the code accepts isomorphism only if
+\begin{equation}
+    AP^*=P^*B
+\end{equation}
+holds exactly.
+
+If the equality fails, the method has not certified isomorphism.
+That is not a proof of non-isomorphism.
+
+\section{What Is Not Currently Implemented}
+
+The current active solver does not include:
+\begin{itemize}[leftmargin=*]
+    \item higher-order terms $\|A^kX-XB^k\|_F^2$ for $k>1$;
+    \item spectral or Grassmannian eigenspace alignment;
+    \item entropy regularization;
+    \item Weisfeiler-Lehman node features;
+    \item exact cutting planes for non-isomorphism.
 \end{itemize}
 
-We define a normalized \textbf{Isomorphism Index} $I \in (0, 1]$:
-\begin{equation}
-\boxed{
-    I = \exp(-\lambda \cdot Z^*)
-}
-\end{equation}
-
-where $\lambda > 0$ is a scaling parameter (default $\lambda = 0.1$). This maps the unbounded objective to a bounded similarity score:
-\begin{itemize}
-    \item $I \approx 1$: Graphs are (likely) isomorphic
-    \item $I \ll 1$: Graphs are structurally dissimilar
-\end{itemize}
-
-\section{Post-Processing: Hungarian Rounding and Integer Verification}
-
-The isomorphism index $I$ is inherently a \emph{fuzzy} score: graphs with automorphisms can produce fractional $\bm{X}^*$ (the solver converges to the analytic center of a face of $\mathcal{B}_n$), yielding $Z^* > 0$ even for genuinely isomorphic graphs. To obtain a \textbf{provably correct binary answer}, we apply a two-step post-processing pipeline.
-
-\subsection{Hungarian Rounding}
-
-Given the optimal doubly stochastic matrix $\bm{X}^*$, we extract the nearest permutation matrix via the Hungarian algorithm:
-\begin{equation}
-    \bm{P}^* = \arg\min_{\bm{P} \in \Pi_n} \|\bm{P} - \bm{X}^*\|_F
-\end{equation}
-where $\Pi_n$ is the set of $n \times n$ permutation matrices. This is equivalent to solving a linear assignment problem on the cost matrix $\bm{1} - \bm{X}^*$, which runs in $O(n^3)$.
-
-\subsection{Integer Arithmetic Verification}
-
-Once $\bm{P}^*$ is obtained, we verify the isomorphism condition \emph{exactly} in integer arithmetic. Since the adjacency matrices $\bm{A}, \bm{B} \in \{0,1\}^{n \times n}$ and the permutation matrix $\bm{P}^* \in \{0,1\}^{n \times n}$ are all integer-valued, the residual
-\begin{equation}
-    \bm{R} = \bm{A}\bm{P}^* - \bm{P}^*\bm{B}
-\end{equation}
-can be computed without any floating-point error. The decision rule is:
-\begin{equation}
-\boxed{
-    \bm{R} = \bm{0} \implies \text{isomorphic}, \qquad
-    \bm{R} \neq \bm{0} \implies \text{inconclusive}
-}
-\end{equation}
-
-When $\bm{R} = \bm{0}$, the permutation $\bm{P}^*$ is a \emph{certificate} of isomorphism---the answer is exact. When $\bm{R} \neq \bm{0}$, the result is inconclusive rather than a definitive ``not isomorphic,'' because the Hungarian rounding may have selected the wrong permutation (e.g., if $\bm{X}^*$ was far from any correct permutation due to local minima).
-
-\section{Interpretation of the Solution}
-
-The solver produces three complementary outputs:
-\begin{itemize}
-    \item \textbf{Isomorphism index $I$}: A continuous similarity score. $I \approx 1$ suggests isomorphism; $I \ll 1$ suggests non-isomorphism. This is a heuristic with no formal threshold guarantee.
-    \item \textbf{Integer certificate}: A boolean flag from the Hungarian rounding + integer verification pipeline. When \texttt{true}, the graphs are \emph{provably} isomorphic. When \texttt{false}, the result is inconclusive.
-    \item \textbf{Soft assignment $\bm{X}^*$}: The doubly stochastic matrix representing the soft node correspondence. If $\bm{X}^*$ is near-binary, the relaxation is tight and the correspondence is sharp.
-\end{itemize}
-
-\section{Complexity}
-
-The QP has $n^2$ variables and $2n$ equality constraints. Modern interior-point solvers achieve polynomial complexity in practice, making this approach tractable for moderate graph sizes ($n \lesssim 100$).
+These are reasonable future extensions, but they should not be presented as
+current implementation.
 
 \end{document}
