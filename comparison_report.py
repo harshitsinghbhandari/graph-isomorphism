@@ -566,9 +566,9 @@ def _render_result_cards(entries):
             '<div class="visual-grid">'
             f'{_render_graph_html(entry["graph_a"], "Graph A")}'
             '<div class="panel">'
-            '<div class="panel-title">Permutation Matrix X*</div>'
-            f'<div class="panel-subtitle">{len(entry["matrix"])} × {len(entry["matrix"])}</div>'
-            f'{_render_matrix_html(entry["matrix"])}'
+            '<div class="panel-title">Permutation Matrix P</div>'
+            f'<div class="panel-subtitle">{len(entry["permutation"])} × {len(entry["permutation"])}</div>'
+            f'{_render_matrix_html(entry["permutation"])}'
             "</div>"
             f'{_render_graph_html(entry["graph_b"], "Graph B")}'
             "</div>"

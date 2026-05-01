@@ -521,7 +521,7 @@ function renderMatrix(n, file) {
     </div>
   `;
 
-  const matrix = file.matrix;
+  const matrix = file.permutation;
   const size = matrix.length;
 
   let sizeClass = '';
@@ -564,7 +564,7 @@ function renderMatrix(n, file) {
     <div class="comparison-layout">
       ${renderGraphPanel('Graph A', file.graph_a, 'Graph A not stored in this result. Rerun the benchmark to embed graph snapshots.')}
       <div class="panel">
-        <div class="panel-title">Permutation Matrix X*</div>
+        <div class="panel-title">Permutation Matrix P</div>
         <div class="panel-subtitle">${size} × ${size}</div>
         ${html}
       </div>
