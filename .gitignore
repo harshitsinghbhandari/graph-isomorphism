@@ -1,4 +1,13 @@
 .venv/
+venv/
 __pycache__/
+*.pyc
+
 data/
 benchmark_data/
+.DS_Store
+
+isomorphism_report.html
+isomorphism_report.json
+comparison_report.html
+matrix_viewer.html
