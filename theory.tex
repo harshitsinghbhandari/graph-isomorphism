@@ -1,49 +1,68 @@
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs}
 \usepackage{enumitem}
 
-\title{\textbf{Theory Note: Current Relaxed GI Objective}}
+\title{\textbf{Theory Note: Relaxed Graph Isomorphism and Hyperplane Rounding}}
 \author{}
-\date{Code-aligned version, 2026-05-01}
+\date{Code-aligned version, 2026-05-02}
 
 \begin{document}
 \maketitle
 
-\section{Graph Isomorphism}
+\section{Graph Isomorphism as a Matrix Equation}
 
 Let $G_A$ and $G_B$ be simple undirected graphs with adjacency matrices
-$A,B\in\{0,1\}^{n\times n}$.
-They are isomorphic if and only if there exists a permutation matrix
+$A,B\in\{0,1\}^{n\times n}$ in a fixed node order.
+The graphs are isomorphic if and only if there exists a permutation matrix
 $P\in\Pi_n$ such that
 \begin{equation}
     AP = PB.
+    \label{eq:ap-pb}
+\end{equation}
+Equivalently,
+\begin{equation}
+    P^\top A P = B.
 \end{equation}
 
-This is equivalent to $P^\top A P = B$.
-The formulation $AP=PB$ is the one used for verification in the codebase.
+The formulation in \eqref{eq:ap-pb} is the one used by the code for exact
+verification.
+The solver may produce scores and relaxed matrices, but a positive decision is
+accepted only after a rounded permutation $\hat P$ satisfies
+\begin{equation}
+    A\hat P = \hat P B
+\end{equation}
+exactly in integer arithmetic.
 
 \section{Birkhoff Relaxation}
 
-The discrete feasible set $\Pi_n$ is relaxed to the Birkhoff polytope
+The discrete feasible set of permutation matrices is relaxed to the Birkhoff
+polytope
 \begin{equation}
     \mathcal{B}_n =
     \left\{
     X \in \mathbb{R}^{n\times n} :
-    X_{ij}\ge 0,\ 
-    \sum_j X_{ij}=1,\ 
+    X_{ij}\ge 0,\quad
+    \sum_j X_{ij}=1,\quad
     \sum_i X_{ij}=1
     \right\}.
 \end{equation}
 
-By the Birkhoff-von Neumann theorem, the vertices of $\mathcal{B}_n$ are
+By the Birkhoff--von Neumann theorem, the vertices of $\mathcal{B}_n$ are
 exactly the permutation matrices.
-Thus the relaxation keeps all exact isomorphism witnesses while allowing the
-solver to search a continuous convex set.
+Therefore $\mathcal{B}_n$ is the natural continuous relaxation of $\Pi_n$:
+it preserves every exact isomorphism witness, while allowing a continuous
+optimization solver to search over fractional matchings.
 
-\section{Current Objective}
+In this relaxation, $X_{ij}$ is interpreted as a soft assignment weight from
+vertex $i$ in $G_A$ to vertex $j$ in $G_B$.
+A permutation matrix is a hard one-to-one assignment.
+A general doubly stochastic matrix is a fractional one-to-one assignment.
 
-The implemented solver optimizes
+\section{Current Relaxed Objective}
+
+The source-of-truth solver optimizes
 \begin{equation}
 \boxed{
     \min_{X\in\mathcal{B}_n}
@@ -51,32 +70,45 @@ The implemented solver optimizes
     +
     w_Q\|AX-XB\|_F^2
 }
+\label{eq:objective}
 \end{equation}
-with default weights $w_C=w_Q=1$.
-
-\subsection{Adjacency Term}
-
-The adjacency term is
+with default weights
 \begin{equation}
-    Q(X)=\|AX-XB\|_F^2.
+    w_C=1,\qquad w_Q=1.
 \end{equation}
-If $X=P$ is a true isomorphism, then $Q(P)=0$.
-This term is the direct continuous analog of the exact condition $AP=PB$.
 
-\subsection{Degree-Profile Term}
+\subsection{Adjacency Commutator Term}
 
+The term
+\begin{equation}
+    Q(X)=\|AX-XB\|_F^2
+\end{equation}
+is the continuous version of the exact isomorphism condition.
+If $X=P$ is a correct isomorphism, then
+\begin{equation}
+    Q(P)=0.
+\end{equation}
+
+This is the cleanest possible baseline because it is directly tied to
+$AP=PB$.
+However, in the relaxed space $\mathcal{B}_n$, fractional matrices can also
+make $AX-XB$ small without being close to a permutation.
+This is why the adjacency term alone is not enough for reliable rounding.
+
+\subsection{Degree-Profile Cost}
+
+The solver adds a node-compatibility cost matrix $C$.
 Let
 \begin{equation}
     d^A_i=\sum_k A_{ik},\qquad d^B_j=\sum_k B_{jk}
 \end{equation}
-be degrees, and
+be degrees, and let
 \begin{equation}
     s^A_i=\sum_k A_{ik}d^A_k,\qquad
     s^B_j=\sum_k B_{jk}d^B_k
 \end{equation}
-be neighbor-degree summaries.
-
-The raw compatibility cost is
+be one-hop neighbor-degree summaries.
+The raw cost is
 \begin{equation}
     C^{raw}_{ij}
     =
@@ -84,51 +116,358 @@ The raw compatibility cost is
     +
     \beta |s^A_i-s^B_j|,
 \end{equation}
-with default $\alpha=1.0$ and $\beta=0.35$.
-The code normalizes $C^{raw}$ by its maximum absolute entry when nonzero.
+with current defaults
+\begin{equation}
+    \alpha=1.0,\qquad \beta=0.35.
+\end{equation}
+The code normalizes $C^{raw}$ by its maximum absolute entry when that maximum
+is nonzero.
 
-\section{Convexity}
+This term discourages assigning vertices with incompatible local profiles.
+It does not solve graph isomorphism by itself, but it improves the relaxed
+objective's separation: random non-isomorphic pairs can still look deceptively
+good under $\|AX-XB\|_F^2$ alone, while the added degree-profile term penalizes
+obvious local mismatches.
 
-The current objective is convex.
-The feasible region is convex, $\langle C,X\rangle$ is linear, and
-$\|AX-XB\|_F^2$ is the squared norm of a linear function of $X$.
+\subsection{Convexity}
+
+The current model is a convex quadratic program.
+The feasible region $\mathcal{B}_n$ is convex.
+The term $\langle C,X\rangle$ is linear.
+The term $\|AX-XB\|_F^2$ is the squared norm of a linear map in $X$, hence
+convex.
 
 Therefore the active model does not require Gurobi's non-convex QP mode.
-Future terms may change this, but the current source-of-truth solver is a
-convex QP.
+Future extensions such as non-convex regularizers may change this, but the
+current implementation is convex.
 
-\section{Score and Certificate}
+\section{Isomorphism Index}
 
-After solving, the code reports
+After solving \eqref{eq:objective}, the code reports
 \begin{equation}
-    I=\exp(-\lambda Z^*)
+    Z^* =
+    w_C\langle C,X^*\rangle
+    +
+    w_Q\|AX^*-X^*B\|_F^2,
 \end{equation}
-with default $\lambda=0.1$.
-This is a similarity score only.
-
-The binary positive certificate is obtained separately.
-The relaxed matrix $X^*$ is rounded to a permutation candidate $P^*$ by the
-hyperplane-rounding routine, and the code accepts isomorphism only if
+and the bounded index
 \begin{equation}
-    AP^*=P^*B
+    I=\exp(-\lambda Z^*),
+    \qquad \lambda=0.1 \text{ by default}.
 \end{equation}
-holds exactly.
 
-If the equality fails, the method has not certified isomorphism.
-That is not a proof of non-isomorphism.
+This index is a similarity score, not a proof.
+A value near $1$ means the relaxed objective found a very low-cost soft
+correspondence.
+A small value means the objective found substantial mismatch.
+Neither case is an exact graph-isomorphism decision.
+
+\section{Why Rounding Is Necessary}
+
+The optimizer returns $X^*\in\mathcal{B}_n$, not necessarily a permutation.
+Even when the graphs are isomorphic, $X^*$ can be fractional because of:
+\begin{itemize}[leftmargin=*]
+    \item graph automorphisms;
+    \item weak node features;
+    \item multiple equivalent minimizers;
+    \item broad valleys in the relaxed objective;
+    \item numerical degeneracy or near-degeneracy.
+\end{itemize}
+
+Therefore the pipeline needs a separate map
+\begin{equation}
+    X^* \longmapsto \hat P\in\Pi_n.
+\end{equation}
+The final decision is then based on whether $\hat P$ satisfies $A\hat P=\hat P B$.
+
+\section{Hyperplane Rounding: Origin in Max-Cut}
+
+The rounding idea is inspired by the Goemans--Williamson algorithm for
+Max-Cut.
+
+\subsection{What Happens in Max-Cut}
+
+In Max-Cut, each vertex must be assigned to one of two sides of a cut.
+The exact problem can be written using binary variables
+\begin{equation}
+    x_i\in\{-1,+1\}.
+\end{equation}
+The discrete condition ``same side or opposite side'' is represented by
+$x_i x_j$.
+
+Goemans and Williamson relax this by replacing each scalar sign $x_i$ with a
+unit vector $v_i$ on a sphere.
+The relaxed semidefinite program optimizes over inner products
+\begin{equation}
+    v_i^\top v_j.
+\end{equation}
+After the SDP is solved, the vectors must be converted back to signs.
+They sample a random hyperplane through the origin.
+Equivalently, they sample a random vector $r$ and set
+\begin{equation}
+    x_i = \operatorname{sign}(r^\top v_i).
+\end{equation}
+Vertices on one side of the hyperplane go to one side of the cut; vertices on
+the other side go to the other side.
+
+The key geometric fact is that the probability that two vectors are separated
+by a random hyperplane depends on their angle:
+\begin{equation}
+    \Pr[\operatorname{sign}(r^\top v_i)\ne \operatorname{sign}(r^\top v_j)]
+    =
+    \frac{\theta_{ij}}{\pi}.
+\end{equation}
+Thus the randomized rounding preserves geometric information from the relaxed
+solution.
+For Max-Cut, this leads to the famous $0.878\ldots$ approximation guarantee.
+
+\subsection{What We Borrow}
+
+We do not have a Max-Cut SDP and we do not split one vertex set into two
+parts.
+The borrowed idea is narrower:
+\begin{quote}
+Use random hyperplanes to convert continuous geometric information into
+discrete signs, while preserving similarity information in expectation.
+\end{quote}
+
+In Max-Cut, signs define a cut.
+In our graph-isomorphism pipeline, signs define fingerprints for possible
+vertex matches.
+
+\section{Adapting Hyperplane Rounding to Graph Isomorphism}
+
+The relaxed GI solver returns a matrix $X^*$.
+Rows correspond to vertices of $G_A$.
+Columns correspond to vertices of $G_B$.
+The entry $X^*_{ij}$ is a soft compatibility weight.
+
+\subsection{SVD Embedding of Rows and Columns}
+
+We first factor
+\begin{equation}
+    X^* = U\Sigma V^\top.
+\end{equation}
+Using rank $r$, define row and column embeddings
+\begin{equation}
+    u_i = U_{i,1:r}\Sigma_{1:r}^{1/2},
+    \qquad
+    v_j = V_{j,1:r}\Sigma_{1:r}^{1/2}.
+\end{equation}
+Then
+\begin{equation}
+    X^*_{ij}
+    \approx
+    \langle u_i,v_j\rangle.
+\end{equation}
+
+This converts the relaxed matrix into two point clouds in the same Euclidean
+space:
+\begin{itemize}[leftmargin=*]
+    \item one point $u_i$ for each vertex $i$ of $G_A$;
+    \item one point $v_j$ for each vertex $j$ of $G_B$.
+\end{itemize}
+The inner products between these two point clouds reconstruct the soft
+assignment matrix.
+
+\subsection{Random Hyperplane Signatures}
+
+Instead of sampling one hyperplane, the implementation samples $k$ hyperplanes.
+Let
+\begin{equation}
+    G\in\mathbb{R}^{r\times k}
+\end{equation}
+have independent standard Gaussian columns.
+For each vertex $i$ in $G_A$, define its sign signature
+\begin{equation}
+    s_i
+    =
+    \operatorname{sign}(u_i^\top G)
+    \in\{-1,+1\}^k.
+\end{equation}
+For each vertex $j$ in $G_B$, define
+\begin{equation}
+    t_j
+    =
+    \operatorname{sign}(v_j^\top G)
+    \in\{-1,+1\}^k.
+\end{equation}
+
+If $u_i$ and $v_j$ point in similar directions, their sign signatures tend to
+agree on many hyperplanes.
+If they point in different directions, their signatures disagree more often.
+Thus the signatures are randomized discrete summaries of the geometry of
+$X^*$.
+
+The code uses
+\begin{equation}
+    k = \left\lceil 4\log_2(n+2)\right\rceil
+\end{equation}
+by default.
+This keeps the signature length logarithmic in the graph size while giving
+enough bits to distinguish many vertices.
+
+\subsection{Assignment from Signature Distances}
+
+For each possible match $(i,j)$, define the Hamming-distance cost
+\begin{equation}
+    H_{ij}
+    =
+    \frac{k - s_i^\top t_j}{2}.
+\end{equation}
+This counts how many hyperplane signs disagree between row vertex $i$ and
+column vertex $j$.
+
+The code then solves the linear assignment problem
+\begin{equation}
+    \min_{\pi\in S_n}
+    \sum_{i=1}^n H_{i,\pi(i)}
+\end{equation}
+using the Hungarian algorithm.
+This produces a permutation candidate $\hat P$.
+
+Therefore Hungarian is still used as a subroutine, but not directly on
+$1-X^*$.
+It is used after random-hyperplane signatures have transformed the soft matrix
+geometry into a discrete matching cost.
+
+\subsection{Repeated Trials and Exact Residual Scoring}
+
+One set of random hyperplanes gives one candidate permutation.
+Because the hyperplanes are random, the implementation repeats the process for
+$T=200$ trials by default.
+For each trial permutation $P_t$, it computes
+\begin{equation}
+    R(P_t)=\|AP_t-P_tB\|_F^2
+\end{equation}
+in integer arithmetic.
+The best trial is
+\begin{equation}
+    \hat P = \arg\min_t R(P_t).
+\end{equation}
+If any trial gives $R(P_t)=0$, the code stops early because it has found an
+exact isomorphism witness.
+
+\section{Why Not Direct Hungarian Rounding?}
+
+A natural simpler rounding method is:
+\begin{equation}
+    \max_{P\in\Pi_n} \langle X^*,P\rangle,
+\end{equation}
+or equivalently minimize $\langle 1-X^*,P\rangle$.
+This is direct Hungarian rounding.
+
+Direct Hungarian rounding is useful and should be treated as a baseline.
+However, it has limitations for this project.
+
+\subsection{Hungarian Uses Entries Locally}
+
+Direct Hungarian rounding sees only the scalar entries $X^*_{ij}$.
+If many entries are close, then many assignments have almost the same cost.
+The method must choose one deterministic permutation even when $X^*$ is
+diffuse or nearly tied.
+
+This is common in graph isomorphism because automorphisms and symmetric
+substructures can make several vertex correspondences equally plausible.
+
+\subsection{Hyperplane Rounding Uses Geometry}
+
+Hyperplane rounding first embeds rows and columns of $X^*$ into a shared
+geometric space.
+The sign signatures are not based only on one entry at a time.
+They summarize how each row or column relates to the whole low-rank structure
+of $X^*$.
+
+This gives a different kind of rounding signal:
+\begin{itemize}[leftmargin=*]
+    \item direct Hungarian asks which individual entries of $X^*$ are largest;
+    \item hyperplane rounding asks which row and column embeddings have similar
+    randomized geometric fingerprints.
+\end{itemize}
+
+When $X^*$ is already sharp, both approaches should often agree.
+When $X^*$ is diffuse, hyperplane rounding can explore candidate permutations
+that direct entrywise rounding may miss.
+
+\subsection{Hyperplane Rounding Produces Multiple Candidates}
+
+Direct Hungarian rounding gives one permutation.
+Hyperplane rounding gives a family of candidate permutations, one per random
+trial.
+The graph structure is then used to score each candidate by the exact residual
+\begin{equation}
+    \|AP-PB\|_F^2.
+\end{equation}
+
+This is important because the final objective is not just to pick a high-entry
+assignment in $X^*$.
+The final objective is to find a permutation that actually commutes the
+adjacency matrices.
+
+\subsection{Honest Limitation}
+
+Hyperplane rounding does not currently come with a Max-Cut-style approximation
+guarantee for graph isomorphism.
+The Max-Cut guarantee depends on the exact Max-Cut SDP geometry and the cut
+objective.
+Our use is an adaptation, not the same theorem.
+
+Thus the correct claim is:
+\begin{quote}
+Hyperplane rounding is a geometry-aware randomized extraction method inspired
+by Max-Cut; it is not a proven replacement for direct Hungarian rounding.
+\end{quote}
+
+The reason to use it in this project is experimental and structural:
+it exposes more candidate permutations from the relaxed matrix, uses global
+geometry rather than only entrywise magnitudes, and lets the exact residual
+$AP=PB$ choose the best candidate.
+
+\section{Complete Current Pipeline}
+
+The active pipeline is:
+\begin{enumerate}[leftmargin=*]
+    \item Build adjacency matrices $A$ and $B$ in deterministic sorted-node
+    order.
+    \item Build the normalized degree-profile cost matrix $C$.
+    \item Solve the convex QP \eqref{eq:objective} over $\mathcal{B}_n$.
+    \item Store the relaxed matrix $X^*$ and objective components.
+    \item Embed rows and columns of $X^*$ with SVD.
+    \item Sample random hyperplanes and create row/column sign signatures.
+    \item Solve a linear assignment problem on Hamming-distance costs.
+    \item Repeat rounding trials and keep the permutation with minimum
+    $\|AP-PB\|_F^2$.
+    \item Certify isomorphism only if the best permutation satisfies
+    $A\hat P=\hat P B$ exactly.
+\end{enumerate}
 
 \section{What Is Not Currently Implemented}
 
-The current active solver does not include:
+The active source-of-truth solver does not include:
 \begin{itemize}[leftmargin=*]
     \item higher-order terms $\|A^kX-XB^k\|_F^2$ for $k>1$;
     \item spectral or Grassmannian eigenspace alignment;
-    \item entropy regularization;
-    \item Weisfeiler-Lehman node features;
-    \item exact cutting planes for non-isomorphism.
+    \item entropy regularization on the presentation branch;
+    \item Weisfeiler--Lehman node features;
+    \item exact cutting planes for proving non-isomorphism.
 \end{itemize}
 
 These are reasonable future extensions, but they should not be presented as
 current implementation.
+
+\section{Key Takeaways}
+
+\begin{enumerate}[leftmargin=*]
+    \item The relaxed QP creates a soft correspondence matrix $X^*$.
+    \item The degree-profile term improves separation compared with the
+    adjacency-only objective.
+    \item The index $I=\exp(-\lambda Z^*)$ is a score, not a proof.
+    \item Hyperplane rounding adapts the Max-Cut idea of random geometric
+    discretization to the problem of extracting a permutation from $X^*$.
+    \item Hungarian assignment is still used internally, but on randomized
+    signature distances rather than directly on $1-X^*$.
+    \item The only positive certificate is the exact equality
+    $A\hat P=\hat P B$.
+\end{enumerate}
 
 \end{document}

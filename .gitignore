@@ -7,6 +7,12 @@ data/
 benchmark_data/
 compare_*/
 single_case_*/
+isomorphic_stress_results/
+insane_iso_stress/
+random_vf2_results/
+insane_random_vf2/
+random_density_confusion_results/
+large/
 *_matrix_viewer.html
 .DS_Store
 

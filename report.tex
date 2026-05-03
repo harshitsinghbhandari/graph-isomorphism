@@ -1,395 +1,560 @@
-\documentclass[11pt]{article}
+\documentclass[12pt,a4paper]{article}
+
+% ── Packages ──
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage[margin=1in]{geometry}
-\usepackage{amsmath,amssymb}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
 \usepackage{booktabs}
-\usepackage{array}
-\usepackage{enumitem}
+\usepackage{graphicx}
+\graphicspath{{figures/}}
 \usepackage{hyperref}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{enumitem}
+\usepackage{float}
 
-\hypersetup{
-    colorlinks=true,
-    linkcolor=blue!60!black,
-    urlcolor=blue!60!black
+% ── Colors ──
+\definecolor{iitbblue}{RGB}{0,59,121}
+
+% ── Theorem environments ──
+\newtheorem{definition}{Definition}[section]
+\newtheorem{proposition}{Proposition}[section]
+\newtheorem{remark}{Remark}[section]
+
+% ── Metadata ──
+\title{\textbf{\LARGE Graph Isomorphism via Continuous Relaxation\\
+and Hyperplane Rounding}\\[0.4em]
+\large IE210: Optimization Lab Report - Group: 4}
+\author{
+    Harshit Singh Bhandari (24B4506) \quad \\[0.3em] Ayusha Hongekar (24B4527) \quad \\[0.3em] Shivakshi Gupta (24B4523) \\[0.3em]
+   Prashant Gautam (24B4526) \quad \\[0.3em] Anant Asati (24B4530)
 }
+\date{Department of Industrial Engineering \& Operations Research\\
+Indian Institute of Technology Bombay\\[0.8em]
+Spring 2026}
 
-\title{\textbf{Graph Isomorphism by Continuous Relaxation and Hyperplane Rounding}}
-\author{}
-\date{Presentation draft, 2026-05-01}
+\hypersetup{colorlinks=true, linkcolor=iitbblue, urlcolor=iitbblue}
 
 \begin{document}
 \maketitle
+\thispagestyle{empty}
 
 \begin{abstract}
-This report documents the current codebase-grounded Phase 1 graph
-isomorphism pipeline.
-The method relaxes the discrete permutation search to a quadratic program over
-the Birkhoff polytope, adds a degree-profile cost to the adjacency
-commutator objective, rounds the relaxed matrix with a hyperplane method, and
-accepts an isomorphism only when the rounded permutation passes the exact
-integer check $AP = PB$.
-
-The central result of Phase 1 is intentionally narrow: the relaxation gives an
-interpretable soft correspondence matrix, the degree-profile term improves
-separation over an adjacency-only objective, and the current bottleneck is now
-clearly located in rounding quality and solver scaling.
+\noindent
+This report documents a graph isomorphism (GI) pipeline that relaxes the
+discrete permutation search to a quadratic program over the Birkhoff polytope,
+adds a degree-profile cost to the adjacency commutator objective, rounds the
+relaxed matrix with a Goemans--Williamson-style hyperplane method, and accepts
+an isomorphism only when the rounded permutation passes the exact integer check
+$A\hat{P} = \hat{P}B$.  The central result is intentionally narrow: the
+relaxation gives an interpretable soft correspondence matrix, the degree-profile
+term improves separation over an adjacency-only objective, and the current
+bottleneck is clearly located in rounding quality and solver scaling.
 \end{abstract}
 
 \tableofcontents
 \newpage
 
-\section{Problem Statement}
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Problem Statement}\label{sec:problem}
+% ══════════════════════════════════════════════════════════════════════════════
 
 Given two simple undirected graphs $G_A$ and $G_B$ with $n$ vertices, let
-$A,B \in \{0,1\}^{n \times n}$ be their adjacency matrices in deterministic
-node order.
-The graphs are isomorphic if there exists a permutation matrix
-$P \in \{0,1\}^{n \times n}$ such that
-\begin{equation}
-    AP = PB.
+$A, B \in \{0,1\}^{n \times n}$ be their adjacency matrices in deterministic
+(sorted) node order.  The graphs are isomorphic if there exists a permutation
+matrix $P \in \{0,1\}^{n \times n}$ such that
+\begin{equation}\label{eq:ap_pb}
+  AP = PB.
 \end{equation}
-
-Equivalently,
-\begin{equation}
-    P^\top A P = B.
-\end{equation}
-
-The direct search space contains $n!$ permutations.
-The implemented approach replaces that discrete search with a continuous
+Equivalently, $P^\top AP = B$.  The direct search space contains $n!$
+permutations.  Our approach replaces that discrete search with a continuous
 relaxation, then tries to recover a discrete certificate.
 
-\section{Relaxation}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{graph_perm_example.png}
+\caption{A graph isomorphism represented as a permutation matrix.  The graphs
+look different because the node labels have been permuted, but the permutation
+matrix $P$ certifies the identity $AP = PB$.}
+\label{fig:graph_perm_example}
+\end{figure}
 
-A matrix $X \in \mathbb{R}^{n \times n}$ is doubly stochastic if
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{pipeline.png}
+\caption{End-to-end pipeline: convert graphs to adjacency matrices, solve the
+relaxed QP over the Birkhoff polytope, round the relaxed solution, and accept
+only after the exact certificate check $A\hat{P} = \hat{P}B$.}
+\label{fig:pipeline}
+\end{figure}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Baseline Algorithms}\label{sec:baselines}
+% ══════════════════════════════════════════════════════════════════════════════
+
+As preliminary work before the optimization solver, classical polynomial-time
+algorithms were implemented and benchmarked.
+
+\paragraph{AHU Tree Isomorphism.}
+Find tree centroids via iterative leaf removal, root at centroids, then label
+bottom-up: $\operatorname{label}(v) =
+\operatorname{hash}(\operatorname{sorted}\{\operatorname{label}(c) : c \in
+\text{children}(v)\})$.  A \emph{shared} mapping across both trees ensures
+labels match iff subtrees are identical.  Complexity: $O(n)$.  Benchmarked on
+random trees up to $n = 10{,}000$.
+
+\paragraph{Weinberg's Planar Canonical Code.}
+Compute a planar embedding (rotation system), then for each starting edge
+perform a DFS following the rotation, recording a code sequence.  The
+lexicographically smallest code is the canonical form.  Two planar graphs are
+isomorphic iff their canonical codes match.  Complexity: $O(n^2)$.  Benchmarked
+across 6 graph families (paths, cycles, ladders, grids, wheels, random planar)
+up to $n = 200$.
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Background}\label{sec:background}
+% ══════════════════════════════════════════════════════════════════════════════
+
+The GI problem occupies a rare complexity niche: it is not known to be in P nor
+proven NP-complete.  Babai (2016) showed it is solvable in quasi-polynomial
+time $2^{O((\log n)^c)}$.  For restricted graph classes, polynomial-time
+algorithms exist:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Graph Class} & \textbf{Algorithm} & \textbf{Complexity} & \textbf{Ref} \\
+\midrule
+Trees          & AHU            & $O(n \log n)$ & Aho et al., 1974 \\
+Planar Graphs  & Weinberg       & $O(n^2)$      & Weinberg, 1966 \\
+Bounded-Degree & Luks           & $O(n^{O(d)})$ & Luks, 1982 \\
+\bottomrule
+\end{tabular}
+\caption{Polynomial-time GI algorithms for special graph classes.}
+\end{table}
+
+We implemented AHU and Weinberg as baselines.  The primary theoretical
+foundation for the optimization approach is Klus \& Ge\ss{} (2025), who
+formulate GI as a QP over the Birkhoff polytope and introduce the Isomorphism
+Similarity Index.  They define \textbf{friendly graphs} - those with all
+distinct eigenvalues and eigenvectors having nonzero inner product with the
+all-ones vector - for which the relaxation has at most one solution.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Relaxation}\label{sec:relaxation}
+% ══════════════════════════════════════════════════════════════════════════════
+
+A matrix $X \in \mathbb{R}^{n \times n}$ is \emph{doubly stochastic} if
 \begin{equation}
-    X_{ij} \ge 0,\qquad
-    \sum_j X_{ij}=1,\qquad
-    \sum_i X_{ij}=1.
+  X_{ij} \geq 0, \qquad
+  \sum_j X_{ij} = 1 \;\;\forall\, i, \qquad
+  \sum_i X_{ij} = 1 \;\;\forall\, j.
 \end{equation}
 
 The set of all doubly stochastic matrices is the Birkhoff polytope
-$\mathcal{B}_n$.
-Its vertices are exactly the permutation matrices.
-This makes $\mathcal{B}_n$ the natural continuous relaxation of the discrete
-permutation set.
+$\mathcal{B}_n$.  Making $\mathcal{B}_n$ the natural continuous
+relaxation of the discrete permutation set.
 
-In the solver, $X$ is interpreted as a soft node-correspondence matrix.
-Large $X_{ij}$ means vertex $i$ in $G_A$ is being softly matched to vertex $j$
+In the solver, $X$ is interpreted as a \emph{soft node-correspondence matrix}:
+$X_{ij}$ large means vertex $i$ in $G_A$ is being softly matched to vertex $j$
 in $G_B$.
 
-\section{Implemented Objective}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{birkhoff_relaxation.png}
+\caption{The Birkhoff polytope relaxes permutation matrices to doubly
+stochastic matrices.  A permutation matrix is a vertex; the relaxed solution
+$X^*$ can lie in the interior and contain fractional assignment weights.}
+\label{fig:birkhoff_relaxation}
+\end{figure}
 
-The current solver in \texttt{isomorphism.py} optimizes exactly two terms:
-\begin{equation}
-    \min_{X \in \mathcal{B}_n}
-    \quad
-    w_C \langle C, X \rangle
-    +
-    w_Q \|AX - XB\|_F^2.
-    \label{eq:implemented-objective}
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Implemented Objective}\label{sec:objective}
+% ══════════════════════════════════════════════════════════════════════════════
+
+The solver optimizes exactly two terms:
+\begin{equation}\label{eq:full_obj}
+  \min_{X \in \mathcal{B}_n} \;
+  w_C \langle C, X \rangle + w_Q \|AX - XB\|_F^2
 \end{equation}
+with default weights $w_C = 1.0$, $w_Q = 1.0$.
 
-The default objective weights are
-\begin{equation}
-    w_C = 1.0,\qquad w_Q = 1.0.
-\end{equation}
-
-No higher-order walk term, spectral alignment term, entropy regularizer, or WL
-feature cost is currently active in the source-of-truth solver.
-Those are future extensions, not present implementation.
 
 \subsection{Adjacency Commutator}
 
 The term
 \begin{equation}
-    Q(X)=\|AX-XB\|_F^2
+  Q(X) = \|AX - XB\|_F^2
 \end{equation}
-is the continuous version of the exact condition $AP=PB$.
-If $X=P$ is a correct isomorphism, then $Q(P)=0$.
-
-This is the cleanest baseline objective because it is directly tied to the
-definition of graph isomorphism.
+is the continuous version of the exact condition $AP = PB$.  If $X = P$ is a
+correct isomorphism, then $Q(P) = 0$.  This is the cleanest baseline objective
+because it is directly tied to the definition of graph isomorphism.
 
 \subsection{Degree-Profile Cost}
 
-The solver also builds a node-pair cost matrix from degree information.
-Let
+The solver builds a node-pair cost matrix from degree information.  Let
 \begin{equation}
-    d^A_i = \sum_k A_{ik}, \qquad d^B_j = \sum_k B_{jk}
+  d_i^A = \sum_k A_{ik}, \qquad d_j^B = \sum_k B_{jk}
 \end{equation}
 be vertex degrees, and let
 \begin{equation}
-    s^A_i = \sum_k A_{ik} d^A_k,\qquad
-    s^B_j = \sum_k B_{jk} d^B_k
+  s_i^A = \sum_k A_{ik}\, d_k^A, \qquad
+  s_j^B = \sum_k B_{jk}\, d_k^B
 \end{equation}
-be one-hop neighbor-degree summaries.
-
-The raw cost is
+be one-hop neighbour-degree summaries.  The raw cost is
 \begin{equation}
-    C_{ij}^{raw}
-    =
-    \alpha |d^A_i-d^B_j|
-    +
-    \beta |s^A_i-s^B_j|,
-\end{equation}
-with defaults
-\begin{equation}
-    \alpha=1.0,\qquad \beta=0.35.
+  C^{\text{raw}}_{ij} = \alpha\,|d_i^A - d_j^B| + \beta\,|s_i^A - s_j^B|,
+  \qquad \alpha = 1.0,\;\; \beta = 0.35.
 \end{equation}
 
 The code normalizes this cost matrix by its maximum absolute value when that
-maximum is nonzero.
-This matters because $\langle C,X\rangle$ and $\|AX-XB\|_F^2$ scale
-differently with $n$.
-Without normalization, one term can dominate for reasons unrelated to
-isomorphism quality.
+maximum is nonzero.  This matters because $\langle C, X \rangle$ and
+$\|AX - XB\|_F^2$ scale differently with $n$.  Without normalization, one
+term can dominate for reasons unrelated to isomorphism quality.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{objective_heatmaps.png}
+\caption{Objective diagnostics from a saved solver run: the normalized
+degree-profile cost matrix $C$, the relaxed correspondence $X^*$, the rounded
+permutation $\hat{P}$, and the adjacency residual $AX^* - X^*B$.  These
+heatmaps make the optimization state inspectable instead of treating the solver
+as a black box.}
+\label{fig:objective_heatmaps}
+\end{figure}
 
 \subsection{Convexity}
 
-The current objective is a convex quadratic program.
-The adjacency term is the squared Frobenius norm of a linear map in $X$.
-The degree-profile term is linear.
-The feasible region $\mathcal{B}_n$ is convex.
+The current objective is a convex quadratic program.  The adjacency term is
+the squared Frobenius norm of a linear map in $X$ - hence convex.  The
+degree-profile term is linear.  The feasible region $\mathcal{B}_n$ is convex.
 
-This is important because the current solver does not require Gurobi's
-\texttt{NonConvex=2} mode.
-That would become relevant only after adding genuinely non-convex terms.
-
-\section{Why Not Use Only $\|AX-XB\|_F^2$?}
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Why Not Use Only $\|AX - XB\|_F^2$?}\label{sec:why_degree}
+% ══════════════════════════════════════════════════════════════════════════════
 
 The adjacency-only objective is mathematically clean, but practically weak.
 In relaxed space, many fractional assignments can produce small adjacency
 residuals without committing to a sharp vertex correspondence.
 
-The degree-profile term supplies low-cost local information.
-It discourages matching vertices whose degree and neighbor-degree summaries are
-incompatible.
+The degree-profile term supplies low-cost local information.  It discourages
+matching vertices whose degree and neighbour-degree summaries are incompatible.
 It does not solve graph isomorphism by itself, but it improves the shape of the
 optimization landscape.
 
-The ablation question for Phase 1 is therefore:
-\begin{quote}
-Does adding $\langle C,X\rangle$ improve separation between isomorphic and
-non-isomorphic cases without increasing runtime materially?
-\end{quote}
+The question for this work is therefore:
 
-The current experiments support that direction.
-For small reruns, isomorphic pairs still have objective values close to zero,
-while verified non-isomorphic random pairs receive much larger objective values
-when the degree-profile cost is enabled.
+\begin{center}
+\emph{Does adding $\langle C, X \rangle$ improve separation between isomorphic
+and non-isomorphic cases without increasing runtime materially?}
+\end{center}
 
-\section{Isomorphism Index}
+Current experiments support this direction.  For small reruns, isomorphic pairs
+still have objective values close to zero, while verified non-isomorphic random
+pairs receive much larger objective values when the degree-profile cost is
+enabled.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{index_ablation.png}
+\caption{Same generated graph pairs.  With only
+$\|AX-XB\|_F^2$, random pairs can still receive high index values, so the
+relaxed score is weakly separated.  Adding the degree-profile term keeps
+isomorphic cases near $I=1$ while pushing random-pair scores downward.}
+\label{fig:index_ablation}
+\end{figure}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Isomorphism Index}\label{sec:index}
+% ══════════════════════════════════════════════════════════════════════════════
 
 After optimization, the solver reports the objective value $Z^*$ and a bounded
 similarity score
 \begin{equation}
-    I = \exp(-\lambda Z^*),
+  I = \exp(-\lambda Z^*), \qquad \lambda = 0.1 \text{ (default)}.
 \end{equation}
-with default $\lambda=0.1$.
 
-This index is useful for plots and experiment summaries.
-It is not a proof.
-
-The correct interpretation is:
-\begin{itemize}[leftmargin=*]
-    \item $I \approx 1$ means the relaxed objective found a very low-cost soft
-    correspondence.
-    \item $I \ll 1$ means the relaxed objective found substantial mismatch.
-    \item Neither statement is an exact isomorphism decision.
+This index is useful for plots and experiment summaries.  It is \textbf{not} a
+proof.  The correct interpretation is:
+\begin{itemize}[nosep]
+  \item $I \approx 1$: the relaxed objective found a very low-cost soft
+        correspondence.
+  \item $I \ll 1$: the relaxed objective found substantial mismatch.
+  \item Neither statement is an exact isomorphism decision.
 \end{itemize}
 
-\section{Rounding}
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Rounding}\label{sec:rounding}
+% ══════════════════════════════════════════════════════════════════════════════
 
-The relaxed solution $X^*$ is generally fractional.
-To obtain a candidate isomorphism, the current solver calls
-\texttt{hyperplane\_rounding.py}.
+The relaxed solution $X^*$ is generally fractional.  To obtain a candidate
+isomorphism, the solver calls \texttt{hyperplane\_rounding.py}.
 
 \subsection{Hyperplane Rounding Path}
 
 The current rounding path is:
-\begin{enumerate}[leftmargin=*]
-    \item Compute an SVD embedding of rows and columns of $X^*$.
-    \item Sample random hyperplanes in the embedding space.
-    \item Convert projections into sign signatures.
-    \item Build a Hamming-distance cost matrix between row and column
-    signatures.
-    \item Solve a linear assignment problem to obtain a permutation candidate.
-    \item Repeat for multiple trials and keep the permutation with the smallest
-    integer residual.
+\begin{enumerate}[nosep]
+  \item Compute an SVD embedding of rows and columns of $X^*$.
+  \item Sample random hyperplanes in the embedding space.
+  \item Convert projections into sign signatures.
+  \item Build a Hamming-distance cost matrix between row and column signatures.
+  \item Solve a linear assignment problem to obtain a permutation candidate.
+  \item Repeat for multiple trials and keep the permutation with the smallest
+        integer residual.
 \end{enumerate}
 
-The implementation runs 200 trials by default.
-It stops early if any trial gives zero residual.
+Formally: the SVD $X^* = U\Sigma V^T$ yields row embeddings
+$U_e = U_{[:,:r]}\sqrt{\Sigma_{[:r]}}$ and column embeddings
+$V_e = V_{[:,:r]}\sqrt{\Sigma_{[:r]}}$ such that $X^*_{ij} \approx
+\langle u_i, v_j \rangle$.  For each trial, a Gaussian matrix
+$G \in \mathbb{R}^{r \times k}$ defines random hyperplanes.  The sign
+signatures are $S_A = \operatorname{sign}(U_e G)$ and $S_B =
+\operatorname{sign}(V_e G)$.  The Hamming-distance cost matrix
+$\operatorname{cost}_{ij} = (k - S_A[i,:] \cdot S_B[j,:]) / 2$ feeds the
+Hungarian algorithm.
+
+The implementation runs 200 trials by default with $k = \lceil 4\log_2(n+2)
+\rceil$ hyperplanes per trial.  It stops early if any trial gives zero
+residual---an exact isomorphism witness.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{rounding_diagram.png}
+\caption{Hyperplane rounding converts the SVD embeddings of rows and columns
+of $X^*$ into sign signatures.  The row and column signatures define a
+Hamming-distance assignment problem, whose solution is a candidate permutation.}
+\label{fig:rounding_diagram}
+\end{figure}
 
 \subsection{Relation to Max-Cut}
 
-The inspiration comes from Goemans-Williamson rounding for Max-Cut:
-a continuous geometric solution is converted to a discrete object by random
-hyperplanes.
-
-Here the role is different.
-We are not cutting one vertex set into two sides.
-We are using random hyperplane signatures to convert the two SVD embeddings
-from $X^*$ into a discrete matching problem.
+The inspiration comes from Goemans--Williamson (1995) rounding for Max-Cut: a
+continuous geometric solution is converted to a discrete object by random
+hyperplanes.  Here the role is different.  We are not cutting one vertex set
+into two sides.  We are using random hyperplane \emph{signatures} to convert
+the two SVD embeddings from $X^*$ into a discrete matching problem.
 
 \subsection{Hungarian Baseline}
 
-Hungarian rounding remains an important internal rounding baseline.
-Given $X^*$, it directly finds a high-weight permutation under the assignment
-cost $1-X^*$.
+Hungarian rounding remains an important internal baseline.  Given $X^*$, it
+directly finds a high-weight permutation under the assignment cost $1 - X^*$.
 
 In current small tests, hyperplane rounding has not yet shown a clear
-certificate advantage over the Hungarian baseline.
-That is not a failure of the report; it is a useful experimental result.
+certificate advantage over the Hungarian baseline.  That is not a failure of
+the method; it is a useful experimental result -the value of hyperplane
+rounding may become apparent on harder graph families where $X^*$ is more
+diffuse.
 
-\section{Exact Verification}
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Exact Verification}\label{sec:verification}
+% ══════════════════════════════════════════════════════════════════════════════
 
-The final decision is made only after rounding.
-Given a candidate permutation $P^*$, the code checks
-\begin{equation}
-    AP^* = P^*B
+The final decision is made only after rounding.  Given a candidate permutation
+$\hat{P}$, the code checks
+\begin{equation}\label{eq:cert}
+  A\hat{P} = \hat{P}B
 \end{equation}
 using integer-valued matrices.
 
-If the equality holds, $P^*$ is a certificate of isomorphism.
-If it does not hold, the result is not certified.
+If the equality holds, $\hat{P}$ is a \emph{certificate} of isomorphism.  If it
+does not hold, the result is ``not certified.''  This is the key distinction:
 
-This is the key distinction:
-\begin{equation}
-    \text{failed certificate} \ne \text{proof of non-isomorphism}.
-\end{equation}
+\begin{center}
+\fbox{\textbf{Failed certificate $\neq$ proof of non-isomorphism.}}
+\end{center}
 
-The current method can prove isomorphism when rounding succeeds.
-It does not prove non-isomorphism when rounding fails.
+\noindent The current method can prove isomorphism when rounding succeeds.  It
+does \emph{not} prove non-isomorphism when rounding fails.
 
-\section{Experiment Workflow}
 
-The presentation branch keeps the experiment workflow focused on our method.
-The relevant entry point is \texttt{main.py}.
 
-\subsection{Single Isomorphic Case}
 
-The command
-\begin{quote}
-\texttt{python main.py single --n 101}
-\end{quote}
-generates one clearly isomorphic pair, solves the relaxation, rounds the
-solution, checks $AP^*=P^*B$, and writes a matrix viewer.
-This is the best demonstration path because the expected positive certificate
-is known from construction.
 
-\subsection{Small Range Experiment}
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Experimental Results}\label{sec:results}
+% ══════════════════════════════════════════════════════════════════════════════
 
-The command
-\begin{quote}
-\texttt{python main.py experiment --n-min 5 --n-max 30 --pairs 5}
-\end{quote}
-runs the current solver on isomorphic and independently sampled random pairs.
-It records $Z^*$, $I$, runtime, certificate counts, an HTML report, and a
-matrix viewer.
+\subsection{AHU Tree Isomorphism}
 
-The random-pair label is an experiment label, not a proof.
-For moderate and large $n$, independently sampled dense graphs are almost
-surely non-isomorphic, but the solver's only formal positive statement remains
-the rounded certificate check.
+Benchmarked on random labelled trees, $n = 100$ to $10{,}000$, 10 pairs per
+size, parallelized across 12 workers.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]
+{ahu.jpeg}
+\caption{AHU Algorithm}
+\label{fig:ahu}
+\end{figure}
 
-\subsection{Observed Runtime Pattern}
+\subsection{Planar Graph Algorithms}
 
-The QP solver dominates runtime and memory.
-A practical observation from the server run was that around $n=50$, the current
-QP path was already taking about 11--12 seconds per random pair.
-Scaling to $n=100$ or beyond becomes expensive because the model contains
-$n^2$ variables and builds $O(n^3)$ linear expression terms inside the quadratic
-adjacency residual.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]
+{planar.png}
+\caption{Runtime comparison of Weinberg and AHU-WL on planar graphs across 6
+families.}
+\label{fig:planar}
+\end{figure}
 
+AHU-WL (Weisfeiler--Leman augmented with planar rotation systems)
+outperformed Weinberg by 3--5$\times$.  Grid graphs were the most expensive
+family due to regular structure.
+
+\subsection{QP Solver}
+
+Tested on isomorphic and non-isomorphic random graph pairs (density
+0.80--0.85).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{qp_runtime.png}
+\caption{QP solver wall-clock time (QP + rounding) for iso and non-iso pairs.}
+\label{fig:qp_time}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{iso_index_separation.png}
+\caption{Isomorphism Index $I = e^{-\lambda Z^*}$ separates iso from non-iso
+pairs.}
+\label{fig:iso_index}
+\end{figure}
+
+\paragraph{Observed runtime pattern.}
+The QP solver dominates runtime and memory.  Around $n = 50$, the current QP
+path takes approximately 11--12 seconds per random pair.  Scaling to $n = 100$
+or beyond becomes expensive because the model contains $n^2$ variables and
+builds $O(n^3)$ linear expression terms inside the quadratic adjacency residual.
 This is currently the main engineering bottleneck.
 
-\section{Failure Modes}
+\subsection{Algorithm Comparison}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lllll@{}}
+\toprule
+\textbf{Algorithm} & \textbf{Scope} & \textbf{Complexity} &
+\textbf{Max $n$} & \textbf{Decision} \\
+\midrule
+Brute Force       & General & $O(n!)$            & 10     & Exact \\
+AHU               & Trees   & $O(n)$             & 10,000 & Exact \\
+Weinberg          & Planar  & $O(n^2)$           & 200    & Exact \\
+AHU-WL            & Planar  & $O(n \log n)$      & 200    & Exact \\
+QP + Rounding     & General & $O(n^3)$ construction $+$ QP solve & 90 & Heuristic \\
+\bottomrule
+\end{tabular}
+\caption{Algorithms implemented and benchmarked.  For the QP method,
+$O(n^3)$ refers to construction of the adjacency-commutator expressions:
+there are $n^2$ residual entries and each contains a sum over $n$ terms.
+The continuous QP solve time is solver-dependent and reported empirically
+rather than claimed as a fixed polynomial bound.}
+\label{tab:comparison}
+\end{table}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Failure Modes}\label{sec:failures}
+% ══════════════════════════════════════════════════════════════════════════════
 
 \subsection{Diffuse Relaxed Solutions}
 
 Graphs with symmetry or weak objective identifiability can produce diffuse
-solutions.
-For example, a cycle graph can allow the uniform matrix
+solutions.  For example, a cycle graph can allow the uniform matrix
 \begin{equation}
-    X_{ij} = \frac{1}{n}
+  X_{ij} = \frac{1}{n}
 \end{equation}
-to satisfy the relaxed objective extremely well.
-That matrix contains no sharp permutation information.
+to satisfy the relaxed objective extremely well.  That matrix contains no sharp
+permutation information.  The deeper issue is not only symmetry: the objective
+may have multiple equivalent or near-equivalent minimisers.  When the degree
+cost is weak and the adjacency term has a wide valley, rounding can fail even
+if an exact permutation exists.
 
-The deeper issue is not only symmetry.
-The objective may have multiple equivalent or near-equivalent minimizers.
-When the degree cost is weak and the adjacency term has a wide valley, rounding
-can fail even if an exact permutation exists.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{diffuse_vs_sharp.png}
+\caption{Rounding difficulty depends on how much permutation information is
+present in $X^*$.  A flat interior point contains almost no assignment signal,
+an ambiguous relaxed solution contains partial signal, and a sharp permutation
+matrix directly identifies a candidate isomorphism.}
+\label{fig:diffuse_vs_sharp}
+\end{figure}
 
 \subsection{Weak Cost Matrix}
 
-Degree and neighbor-degree summaries are cheap but incomplete.
-Regular graphs, strongly regular graphs, and many structured families can share
-the same low-order profiles.
-On those cases, $C$ may add little or no information.
-
-A natural next phase is to add stronger node features such as Weisfeiler-Lehman
-color refinement features.
+Degree and neighbour-degree summaries are cheap but incomplete.  Regular
+graphs, strongly regular graphs, and many structured families can share the
+same low-order profiles.  On those cases, $C$ may add little or no
+information.  A natural next step is to add stronger node features such as
+Weisfeiler--Leman colour refinement features.
 
 \subsection{Term Scaling}
 
 The linear degree term and quadratic adjacency term do not scale the same way.
-The code now normalizes $C$, but a full normalization strategy should also
-consider the typical magnitude of $\|AX-XB\|_F^2$ as $n$ changes.
+The code now normalises $C$, but a full normalisation strategy should also
+consider the typical magnitude of $\|AX - XB\|_F^2$ as $n$ changes.
 
 \subsection{Rounding Is Heuristic}
 
-Hyperplane rounding can miss a valid isomorphism even when one exists.
-The result is then inconclusive, not a proof of non-isomorphism.
+Hyperplane rounding can miss a valid isomorphism even when one exists.  The
+result is then inconclusive, not a proof of non-isomorphism.
 
 \subsection{Random-Pair Labels}
 
 Random independently sampled graph pairs are almost surely non-isomorphic for
-moderate $n$, but not guaranteed.
-The report should therefore treat them as random-pair experiments, not formal
-non-isomorphism certificates.
+moderate $n$, but not guaranteed.  The report therefore treats them as
+random-pair experiments, not formal non-isomorphism certificates.
 
-\section{What Phase 1 Establishes}
 
-Phase 1 establishes a working and defensible pipeline:
-\begin{enumerate}[leftmargin=*]
-    \item the GI condition is represented as $AP=PB$;
-    \item the permutation search is relaxed to the Birkhoff polytope;
-    \item the implemented objective combines degree-profile compatibility with
-    adjacency commutation;
-    \item the relaxed solution is rounded into a candidate permutation;
-    \item the final positive decision is certified exactly by $AP^*=P^*B$.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Conclusion}\label{sec:conclusion}
+% ══════════════════════════════════════════════════════════════════════════════
+
+The current project should be viewed as a research prototype.  Its value is
+that it makes graph isomorphism visible as an optimization problem: the soft
+matrix $X^*$, the objective components, and the rounded certificate all expose
+where the method succeeds or fails.
+
+The strongest claim is therefore precise: adding the degree-profile term
+improves the relaxed objective's separation over an adjacency-only baseline,
+while exact certification remains dependent on the rounding stage.  For
+friendly graphs, the relaxation is tight and the method certifies isomorphism
+exactly.  For symmetric or weakly identifiable graphs, the relaxation gap and
+rounding quality remain the fundamental bottlenecks.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section*{References}
+\addcontentsline{toc}{section}{References}
+% ══════════════════════════════════════════════════════════════════════════════
+
+\begin{enumerate}[label={[\arabic*]},nosep]
+  \item Aho, A.V., Hopcroft, J.E., Ullman, J.D. (1974). \emph{The Design and
+        Analysis of Computer Algorithms}. Addison-Wesley.
+  \item Babai, L. (2016). ``Graph Isomorphism in Quasipolynomial Time.''
+        \emph{Proc.\ 48th STOC}, 684--697.
+  \item Cordella, L.P., Foggia, P., Sansone, C., Vento, M. (2004).
+        ``A (Sub)Graph Isomorphism Algorithm for Matching Large Graphs.''
+        \emph{IEEE Trans.\ PAMI}, 26(10), 1367--1372.
+  \item Goemans, M.X., Williamson, D.P. (1995). ``Improved Approximation
+        Algorithms for Maximum Cut and Satisfiability Problems Using
+        Semidefinite Programming.'' \emph{J.\ ACM}, 42, 1115--1145.
+  \item Klus, S., Ge\ss{}, T. (2025). ``Continuous Optimization Methods for
+        the Graph Isomorphism Problem.'' \emph{arXiv preprint}.
+  \item Luks, E.M. (1982). ``Isomorphism of Graphs of Bounded Valence Can Be
+        Tested in Polynomial Time.'' \emph{J.\ CSS}, 25(1), 42--65.
+  \item McKay, B.D., Piperno, A. (2014). ``Practical Graph Isomorphism, II.''
+        \emph{J.\ Symbolic Computation}, 60, 94--112.
+  \item Weinberg, L. (1966). ``A Simple and Efficient Algorithm for
+        Determining Isomorphism of Planar Triply Connected Graphs.''
+        \emph{IEEE Trans.\ Circuit Theory}, 13(2), 142--148.
 \end{enumerate}
-
-It also establishes the limits of the current version:
-\begin{enumerate}[leftmargin=*]
-    \item the QP construction is the runtime bottleneck;
-    \item degree features are useful but weak;
-    \item rounding quality is still an open research component.
-\end{enumerate}
-
-\section{Next Additions}
-
-The clean next additions are:
-\begin{itemize}[leftmargin=*]
-    \item WL-based node compatibility features;
-    \item stronger scaling between objective terms;
-    \item Hungarian-vs-hyperplane rounding study on the same saved $X^*$;
-    \item structured hard graph families beyond dense random graphs;
-    \item a faster model construction path for the adjacency residual.
-\end{itemize}
-
-\section{Conclusion}
-
-The current project should be presented as a research prototype.
-Its value is that it makes graph isomorphism visible as an optimization
-problem: the soft matrix $X^*$, the objective components, and the rounded
-certificate all expose where the method succeeds or fails.
-
-The strongest Phase 1 claim is therefore precise:
-adding the degree-profile term improves the relaxed objective's separation over
-an adjacency-only baseline, while exact certification remains dependent on the
-rounding stage.
 
 \end{document}
