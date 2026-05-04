@@ -388,9 +388,15 @@ Benchmarked on random labelled trees, $n = 100$ to $10{,}000$, 10 pairs per
 size, parallelized across 12 workers.
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.78\textwidth]
-{ahu.jpeg}
-\caption{AHU Algorithm}
+\fbox{\parbox{0.78\textwidth}{\centering
+  \vspace{2.2cm}
+  \textbf{AHU tree isomorphism runtime plot}\\[0.4em]
+  {\small Add teammate benchmark screenshot here if available.}\\[0.2em]
+  {\small $x$: tree size $n$, $y$: mean time.}
+  \vspace{2.2cm}
+}}
+\caption{AHU tree isomorphism runtime confirming linear-time behavior on
+random labelled trees.}
 \label{fig:ahu}
 \end{figure}
 
@@ -398,8 +404,13 @@ size, parallelized across 12 workers.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.78\textwidth]
-{planar.png}
+\fbox{\parbox{0.78\textwidth}{\centering
+  \vspace{2.2cm}
+  \textbf{Planar graph algorithm runtime plot}\\[0.4em]
+  {\small Add teammate benchmark screenshot here if available.}\\[0.2em]
+  {\small Weinberg versus AHU-WL across planar graph families.}
+  \vspace{2.2cm}
+}}
 \caption{Runtime comparison of Weinberg and AHU-WL on planar graphs across 6
 families.}
 \label{fig:planar}
