@@ -259,6 +259,112 @@ Goal:
 Identify whether the main bottleneck is Python expression construction, Gurobi
 solve time, or rounding.
 
+## Phase 6: Exactness on Graph Classes
+
+This is the professor-driven question:
+
+- Which graph classes make our formulation exact, or at least make false
+  positives disappear?
+- Can we prove that some families never certify non-isomorphic pairs?
+- If a polynomial-time GI algorithm exists for a class, can our pipeline be
+  made fully correct on that class by construction?
+
+This phase is about exactness, not just better empirical performance.
+
+### 6.1 Candidate Classes
+
+Start with classes that have known exact GI algorithms or strong canonical
+labeling structure:
+
+- trees;
+- rooted trees;
+- paths and cycles;
+- cographs;
+- interval graphs;
+- chordal graphs;
+- complete graphs;
+- empty graphs;
+- planar 3-connected graphs;
+- bounded-treewidth families;
+- random regular graphs as a stress case, not an exactness candidate.
+
+### 6.2 What To Test
+
+For each class, run:
+
+- `vf2_isomorphic` label;
+- our current QP + rounding pipeline;
+- direct Hungarian baseline;
+- hyperplane rounding;
+- WL-augmented variants once implemented.
+
+Measure:
+
+- false positives on non-isomorphic pairs;
+- false negatives on isomorphic pairs;
+- whether `X*` becomes integral or nearly integral;
+- whether rounding becomes deterministic or unstable;
+- whether the score `I` becomes separated enough to prove anything useful.
+
+### 6.3 Exactness Criteria
+
+We need to distinguish three possibilities:
+
+- `heuristic only`: the class still has false positives;
+- `tight relaxation`: the class has a proof that the relaxation is exact;
+- `certifiable via wrapper`: the generic solver is not exact alone, but a
+  class-specific certification layer makes the full pipeline exact.
+
+The most likely outcome is that we will need a wrapper or a class-specific
+canonicalization layer.
+
+### 6.4 Research Questions
+
+- For which classes does the objective landscape force `X*` close to a
+  permutation?
+- On which classes do false positives vanish even without extra features?
+- Can we characterize a “friendly graph” subset that is large enough to be
+  interesting and small enough to be provable?
+- Can WL features or higher-order terms turn the generic relaxation into an
+  exact method on some smaller class?
+
+### 6.5 Deliverables
+
+- `exactness_classes.py`
+- `exactness_classes_summary.json`
+- proof-oriented notes for candidate classes
+- a table of classes versus:
+  - false positives;
+  - false negatives;
+  - certification rate;
+  - whether the relaxation appears tight;
+  - whether a wrapper is required.
+
+## Phase 7: Proof-Driven Narrative
+
+The next writeup should not just say “we tested more.”
+It should answer the professor’s questions:
+
+1. Where does the current formulation fail?
+2. On which classes can we eliminate those failures?
+3. Can a polynomial-time GI class be handled exactly by our framework?
+
+The final story should be one of these:
+
+- the generic relaxation is useful but not exact;
+- exactness is recoverable on some classes with wrappers;
+- WL/higher-order features push the exactness boundary further;
+- or a proof emerges for a meaningful class where the relaxation is tight.
+
+## Immediate Next Actions
+
+1. Build the exactness-class experiment runner.
+2. Implement tree and cograph generators first.
+3. Compare generic pipeline vs class-specific exact baseline.
+4. Measure false positives and false negatives by class.
+5. Add a notebook/report section summarizing which classes look promising for
+proofs.
+
 ## Immediate Next Actions
 
 1. Run `random_density_confusion.py` overnight.
@@ -268,4 +374,3 @@ solve time, or rounding.
 5. Run ablation: adjacency-only vs degree vs WL vs degree+WL.
 6. Add hard graph family generators.
 7. Build the failure taxonomy report.
-
