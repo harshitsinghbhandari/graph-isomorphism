@@ -288,6 +288,12 @@ labeling structure:
 - bounded-treewidth families;
 - random regular graphs as a stress case, not an exactness candidate.
 
+Also include the paper-driven class notion from Aflalo et al.:
+
+- friendly graphs;
+- graphs made friendly by extra seeds;
+- graphs made friendly by extra vertex attributes.
+
 ### 6.2 What To Test
 
 For each class, run:
@@ -306,6 +312,12 @@ Measure:
 - whether rounding becomes deterministic or unstable;
 - whether the score `I` becomes separated enough to prove anything useful.
 
+Add two extra knobs inspired by the paper:
+
+- a pseudostochastic relaxation variant with only linear equality constraints;
+- seeded and attributed versions of the solver, where the extra information may
+  break symmetries that currently confuse rounding.
+
 ### 6.3 Exactness Criteria
 
 We need to distinguish three possibilities:
@@ -317,6 +329,12 @@ We need to distinguish three possibilities:
 
 The most likely outcome is that we will need a wrapper or a class-specific
 canonicalization layer.
+
+Paper hypothesis to verify:
+
+- if a graph class is friendly, the convex relaxation may become exact;
+- if the class is not friendly, seeds or attributes may restore exactness;
+- the simpler pseudostochastic relaxation may be enough on some families.
 
 ### 6.4 Research Questions
 
@@ -340,7 +358,30 @@ canonicalization layer.
   - whether the relaxation appears tight;
   - whether a wrapper is required.
 
-## Phase 7: Proof-Driven Narrative
+## Phase 7: Paper Translation Experiment
+
+The Aflalo-Bronstein-Kimmel paper suggests three concrete research directions
+that map directly to our code:
+
+1. Friendly-graph detection.
+   - Compute the spectral property used in the paper.
+   - Test whether our current objective is exact on that subset.
+   - Measure whether `X*` becomes integral or nearly integral.
+
+2. Pseudostochastic relaxation.
+   - Replace the doubly stochastic constraints with the paper's affine
+     pseudostochastic variant.
+   - Compare exactness, runtime, and ease of optimization.
+   - Determine whether the simpler feasible set improves or hurts false
+     positives.
+
+3. Seeded / attributed matching.
+   - Add known correspondences or vertex attributes.
+   - Check whether extra information restores exactness on otherwise unfriendly
+     graphs.
+   - Measure how many seeds are needed before the solver becomes reliable.
+
+## Phase 8: Proof-Driven Narrative
 
 The next writeup should not just say “we tested more.”
 It should answer the professor’s questions:
@@ -358,12 +399,15 @@ The final story should be one of these:
 
 ## Immediate Next Actions
 
-1. Build the exactness-class experiment runner.
-2. Implement tree and cograph generators first.
-3. Compare generic pipeline vs class-specific exact baseline.
-4. Measure false positives and false negatives by class.
-5. Add a notebook/report section summarizing which classes look promising for
-proofs.
+1. Extract the friendly-graph condition from the paper into a testable helper.
+2. Build the exactness-class experiment runner.
+3. Implement tree, cograph, and interval-graph generators first.
+4. Compare generic pipeline vs class-specific exact baseline.
+5. Add a pseudostochastic relaxation branch.
+6. Add seeded and attributed graph experiments.
+7. Measure false positives and false negatives by class.
+8. Add a notebook/report section summarizing which classes look promising for
+   proofs.
 
 ## Immediate Next Actions
 
